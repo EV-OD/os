@@ -1,17 +1,15 @@
 {
     "configurations": [
         {
-            "name": "Linux",
+            "name": "OS-Kernel",
             "includePath": [
-                "${workspaceFolder}/**",
-                "/home/rabin/.vscode/extensions/kelify.kelify-0.0.7/assets/headers",
-                "/usr/share/sdcc/include"
+                "${workspaceFolder}/c_files/includes"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "c11",
-            "cppStandard": "c++17",
-            "intelliSenseMode": "linux-gcc-x64"
+            "intelliSenseMode": "linux-gcc-x86",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json"
         }
     ],
     "version": 4

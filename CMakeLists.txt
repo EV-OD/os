@@ -4,27 +4,41 @@ project(os_kernel LANGUAGES C)
 # Set 32-bit compilation flags
 set(CMAKE_C_FLAGS "-m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror -fno-pie")
 
-# Custom command to compile assembly with NASM
+# Add include directory
+include_directories(c_files/includes)
+
+# Custom command to compile loader.s with NASM
 add_custom_command(
     OUTPUT loader.o
-    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/loader.s -o loader.o
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/loader.s
+    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/asm/loader.s -o loader.o
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/loader.s
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Compiling loader.s with NASM"
 )
 
-# Define sources
-set(SOURCES
-    kmain.c
+# Custom command to compile stdio.s with NASM
+add_custom_command(
+    OUTPUT stdio.o
+    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/asm/stdio.s -o stdio.o
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/stdio.s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Compiling stdio.s with NASM"
 )
 
-# Create the executable (add loader.o as the first source for linking)
-add_executable(kernel.elf ${CMAKE_CURRENT_BINARY_DIR}/loader.o ${SOURCES})
+# Define sources
+file(GLOB_RECURSE SOURCES "c_files/src/*.c")
+
+# Create the executable (add NASM objects as sources for linking)
+add_executable(kernel.elf 
+    ${CMAKE_CURRENT_BINARY_DIR}/loader.o 
+    ${CMAKE_CURRENT_BINARY_DIR}/stdio.o 
+    ${SOURCES}
+)
 
 # Set linker options (use -Wl to pass flags to the linker when using the C compiler as a linker)
 set_target_properties(kernel.elf PROPERTIES
-    LINK_FLAGS "-m32 -static -no-pie -nostdlib -Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/link.ld -Wl,-melf_i386"
-    LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/link.ld"
+    LINK_FLAGS "-m32 -static -no-pie -nostdlib -Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/linker/link.ld -Wl,-melf_i386"
+    LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linker/link.ld"
 )
 
 # Custom command to create os.iso

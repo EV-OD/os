@@ -18,6 +18,7 @@ loader:
     push ebx
     push eax
     call kmain
+
 .loop:
     jmp .loop
 
