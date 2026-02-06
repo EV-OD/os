@@ -35,6 +35,14 @@ genisoimage -R \
 
 
 
-# This command runs the QEMU emulator with the generated ISO image.
-# -cdrom os.iso specifies the ISO image to use as a CD-ROM.
-qemu-system-i386 -cdrom os.iso
+# This command runs the Bochs emulator with the specified configuration file (bochsrc.txt) and the -q option to suppress output. Bochs is an open-source x86 emulator that allows you to run and test operating systems and software in a virtualized environment. The bochsrc.txt file contains the configuration settings for the emulator, such as the hardware specifications, boot options, and other parameters needed to run the ISO image created in the previous step.
+# bochs -f bochsrc.txt -q
+
+
+
+# This command runs the QEMU emulator with specified configuration.
+# -cdrom os.iso specifies the ISO image to use.
+# -m 32 sets the memory to 32MB (matching bochsrc.txt).
+# -boot d ensures it boots from the CD-ROM.
+qemu-system-i386 -cdrom os.iso -m 32 -boot d
+
