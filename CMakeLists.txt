@@ -7,10 +7,10 @@ set(CMAKE_C_FLAGS "-m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -n
 # Custom command to compile assembly with NASM
 add_custom_command(
     OUTPUT loader.o
-    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/loader.asm -o loader.o
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/loader.asm
+    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/loader.s -o loader.o
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/loader.s
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Compiling loader.asm"
+    COMMENT "Compiling loader.s with NASM"
 )
 
 # Define sources
