@@ -33,3 +33,7 @@ genisoimage -R \
     -o os.iso \
     iso
 
+
+
+# This command runs the Bochs emulator with the specified configuration file (bochsrc.txt) and the -q option to suppress output. Bochs is an open-source x86 emulator that allows you to run and test operating systems and software in a virtualized environment. The bochsrc.txt file contains the configuration settings for the emulator, such as the hardware specifications, boot options, and other parameters needed to run the ISO image created in the previous step.
+bochs -f bochsrc.txt -q
