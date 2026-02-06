@@ -10,8 +10,12 @@ align 4
     dd FLAG
     dd CHECKSUM
 
+extern kmain
+
 loader:
-    mov eax, 0xCAFEBABE 
+    push ebx
+    push eax
+    call kmain
 .loop:
     jmp .loop
 
