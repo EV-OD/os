@@ -2,5 +2,6 @@
 *.elf
 *.iso
 *log.txt
+build/*
 
 grub-0.97/*

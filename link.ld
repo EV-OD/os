@@ -7,6 +7,7 @@ SECTIONS
     . = 1M; /* set the starting address to 1MB */
     .text ALIGN (4): 
     {
+        *(.multiboot_header)
         *(.text) /* include all .text sections from the input files */
     }
      .rodata ALIGN (4): 
@@ -22,6 +23,12 @@ SECTIONS
     {
         *(.common) /* include all common sections from the input files */
         *(.bss) /* include all .bss sections from the input files */
+    }
+
+    /DISCARD/ :
+    {
+        *(.note.gnu.build-id)
+        *(.comment)
     }
 }
 
