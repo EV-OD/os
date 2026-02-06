@@ -44,5 +44,6 @@ genisoimage -R \
 # -cdrom os.iso specifies the ISO image to use.
 # -m 32 sets the memory to 32MB (matching bochsrc.txt).
 # -boot d ensures it boots from the CD-ROM.
-qemu-system-i386 -cdrom os.iso -m 32 -boot d
+# -monitor stdio allows checking registers via the terminal (type 'info registers').
+qemu-system-i386 -cdrom os.iso -m 32 -boot d -monitor stdio
 
