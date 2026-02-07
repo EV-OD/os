@@ -106,11 +106,12 @@ void serial_configure_fifo(unsigned short com);
  *  Configures the modem of the given serial port.
  *
  *  @param com  The serial port to configure
+ *
  */
 void serial_configure_modem(unsigned short com);
 
 
-/** serial_is_transmit_fifo_empty:
+/** serial_is_transmit_fifo_empty_com:
  *  Checks whether the transmit FIFO queue is empty or not for the given COM
  *  port.
  *
@@ -118,33 +119,82 @@ void serial_configure_modem(unsigned short com);
  *  @return 0 if the transmit FIFO queue is not empty
  *          1 if the transmit FIFO queue is empty
  */
-int serial_is_transmit_fifo_empty(unsigned int com);
+int serial_is_transmit_fifo_empty_com(unsigned int com);
 
 
-/** serial_init:
+/** serial_is_transmit_fifo_empty:
+ *  Checks whether the transmit FIFO queue is empty or not for SERIAL_COM1_BASE.
+ *
+ *  @return 0 if the transmit FIFO queue is not empty
+ *          1 if the transmit FIFO queue is empty
+ */
+int serial_is_transmit_fifo_empty(void);
+
+
+/** serial_init_com:
  *  Initializes the given serial port.
  *
  *  @param com  The serial port to initialize
  */
-void serial_init(unsigned short com);
+void serial_init_com(unsigned short com);
 
 
-/** serial_write_char:
+/** serial_init:
+ *  Initializes SERIAL_COM1_BASE.
+ */
+void serial_init(void);
+
+
+/** serial_begin_com:
+ *  Initializes the given serial port with a specific baud rate.
+ *
+ *  @param com        The serial port to initialize
+ *  @param baud_rate  The desired baud rate (e.g., 9600, 115200)
+ */
+void serial_begin_com(unsigned short com, unsigned int baud_rate);
+
+
+/** serial_begin:
+ *  Initializes SERIAL_COM1_BASE with a specific baud rate.
+ *
+ *  @param baud_rate  The desired baud rate (e.g., 9600, 115200)
+ */
+void serial_begin(unsigned int baud_rate);
+
+
+/** serial_write_char_com:
  *  Writes a character to the given serial port.
  *
  *  @param com  The serial port to write to
  *  @param c    The character to write
  */
-void serial_write_char(unsigned short com, char c);
+void serial_write_char_com(unsigned short com, char c);
 
 
-/** serial_write:
+/** serial_write_char:
+ *  Writes a character to SERIAL_COM1_BASE.
+ *
+ *  @param c    The character to write
+ */
+void serial_write_char(char c);
+
+
+/** serial_write_com:
  *  Writes a buffer of characters to the given serial port.
  *
  *  @param com  The serial port to write to
  *  @param buf  The buffer of characters
  *  @param len  The length of the buffer
  */
-void serial_write(unsigned short com, char *buf, unsigned int len);
+void serial_write_com(unsigned short com, char *buf, unsigned int len);
+
+
+/** serial_write:
+ *  Writes a buffer of characters to SERIAL_COM1_BASE.
+ *
+ *  @param buf  The buffer of characters
+ *  @param len  The length of the buffer
+ */
+void serial_write(char *buf, unsigned int len);
 
 #endif /* INCLUDE_SERIAL_H */

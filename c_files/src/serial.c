@@ -27,32 +27,69 @@ void serial_configure_modem(unsigned short com)
 }
 
 
-int serial_is_transmit_fifo_empty(unsigned int com)
+int serial_is_transmit_fifo_empty_com(unsigned int com)
 {
     return inb(SERIAL_LINE_STATUS_PORT(com)) & SERIAL_FIFO_EMPTY;
 }
 
 
-void serial_init(unsigned short com)
+int serial_is_transmit_fifo_empty(void)
 {
-    serial_configure_baud_rate(com, 3);
+    return serial_is_transmit_fifo_empty_com(SERIAL_COM1_BASE);
+}
+
+
+void serial_init_com(unsigned short com)
+{
+    serial_begin_com(com, 38400);
+}
+
+
+void serial_init(void)
+{
+    serial_init_com(SERIAL_COM1_BASE);
+}
+
+
+void serial_begin_com(unsigned short com, unsigned int baud_rate)
+{
+    unsigned short divisor = 115200 / baud_rate;
+    serial_configure_baud_rate(com, divisor);
     serial_configure_line(com);
     serial_configure_fifo(com);
     serial_configure_modem(com);
 }
 
 
-void serial_write_char(unsigned short com, char c)
+void serial_begin(unsigned int baud_rate)
 {
-    while (serial_is_transmit_fifo_empty(com) == 0);
+    serial_begin_com(SERIAL_COM1_BASE, baud_rate);
+}
+
+
+void serial_write_char_com(unsigned short com, char c)
+{
+    while (serial_is_transmit_fifo_empty_com(com) == 0);
     outb(SERIAL_DATA_PORT(com), c);
 }
 
 
-void serial_write(unsigned short com, char *buf, unsigned int len)
+void serial_write_char(char c)
+{
+    serial_write_char_com(SERIAL_COM1_BASE, c);
+}
+
+
+void serial_write_com(unsigned short com, char *buf, unsigned int len)
 {
     for (unsigned int i = 0; i < len; i++) {
-        serial_write_char(com, buf[i]);
+        serial_write_char_com(com, buf[i]);
     }
+}
+
+
+void serial_write(char *buf, unsigned int len)
+{
+    serial_write_com(SERIAL_COM1_BASE, buf, len);
 }
 
