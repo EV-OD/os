@@ -180,21 +180,19 @@ void serial_write_char(char c);
 
 
 /** serial_write_com:
- *  Writes a buffer of characters to the given serial port.
+ *  Writes a null-terminated string to the given serial port.
  *
  *  @param com  The serial port to write to
- *  @param buf  The buffer of characters
- *  @param len  The length of the buffer
+ *  @param buf  The null-terminated string
  */
-void serial_write_com(unsigned short com, char *buf, unsigned int len);
+void serial_write_com(unsigned short com, char *buf);
 
 
 /** serial_write:
- *  Writes a buffer of characters to SERIAL_COM1_BASE.
+ *  Writes a null-terminated string to SERIAL_COM1_BASE.
  *
- *  @param buf  The buffer of characters
- *  @param len  The length of the buffer
+ *  @param buf  The null-terminated string
  */
-void serial_write(char *buf, unsigned int len);
+void serial_write(char *buf);
 
 #endif /* INCLUDE_SERIAL_H */

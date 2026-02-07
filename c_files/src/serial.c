@@ -80,16 +80,16 @@ void serial_write_char(char c)
 }
 
 
-void serial_write_com(unsigned short com, char *buf, unsigned int len)
+void serial_write_com(unsigned short com, char *buf)
 {
-    for (unsigned int i = 0; i < len; i++) {
-        serial_write_char_com(com, buf[i]);
+    while (*buf) {
+        serial_write_char_com(com, *buf++);
     }
 }
 
 
-void serial_write(char *buf, unsigned int len)
+void serial_write(char *buf)
 {
-    serial_write_com(SERIAL_COM1_BASE, buf, len);
+    serial_write_com(SERIAL_COM1_BASE, buf);
 }
 
