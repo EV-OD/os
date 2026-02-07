@@ -13,4 +13,5 @@ void kmain()
     char buf[128];
     sprintf(buf, "OS loaded. Version: %d. Subsystem: %s. Code: %c", 1, "String", 'A');
     serial_write(buf);
+    puts(buf);
 }
