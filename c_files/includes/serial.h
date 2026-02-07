@@ -43,6 +43,36 @@ Content: | lvl | bs | r | dma | clt | clr | e |
 */
 #define  SERIAL_FIFO_ENABLE_14BYTES      0xC7
 
+
+/*
+Configuring the Modem
+
+0x03 = 00000011 (RTS = 1 and DTS = 1).
+Bit:     | 7 | 6 | 5  | 4  | 3   | 2   | 1   | 0   |
+Content: | r | r | af | lb | ao2 | ao1 | rts | dtr |
+
+
+We don’t need to enable interrupts, because we won’t handle any received data. Therefore we use the configuration value 0x03 = 00000011 (RTS = 1 and DTS = 1).
+
+
+*/
+
+
+#define SERIAL_MODEM_CONFIG 0x03
+
+
+
+/*
+SERIAL_FIFO_EMPTY:
+    * Transmit FIFO queue is empty
+    * Bit 5 of the Line Status Register (LSR) indicates whether the transmit FIFO queue is empty.
+    * If this bit is set (1), it means that the FIFO queue is empty and ready to accept new data for transmission.
+    * If this bit is clear (0), it means that there is still data in the FIFO queue waiting to be transmitted.
+    * 
+0x20 = 0010 0000 
+*/
+#define  SERIAL_FIFO_EMPTY 0x20
+
 /** serial_configure_baud_rate:
  *  Sets the speed of the data being sent. The default speed of a serial
  *  port is 115200 bits/s. The argument is a divisor of that number, hence
@@ -59,8 +89,62 @@ void serial_configure_baud_rate(unsigned short com, unsigned short divisor);
  *  data length of 8 bits, no parity bits, one stop bit and break control
  *  disabled.
  *
- *  @param com  The serial port to configure
+ *  @param  com The serial port to configure
  */
 void serial_configure_line(unsigned short com);
+
+
+/** serial_configure_fifo:
+ *  Configures the FIFO buffer of the given serial port.
+ *
+ *  @param com  The serial port to configure
+ */
+void serial_configure_fifo(unsigned short com);
+
+
+/** serial_configure_modem:
+ *  Configures the modem of the given serial port.
+ *
+ *  @param com  The serial port to configure
+ */
+void serial_configure_modem(unsigned short com);
+
+
+/** serial_is_transmit_fifo_empty:
+ *  Checks whether the transmit FIFO queue is empty or not for the given COM
+ *  port.
+ *
+ *  @param  com The COM port
+ *  @return 0 if the transmit FIFO queue is not empty
+ *          1 if the transmit FIFO queue is empty
+ */
+int serial_is_transmit_fifo_empty(unsigned int com);
+
+
+/** serial_init:
+ *  Initializes the given serial port.
+ *
+ *  @param com  The serial port to initialize
+ */
+void serial_init(unsigned short com);
+
+
+/** serial_write_char:
+ *  Writes a character to the given serial port.
+ *
+ *  @param com  The serial port to write to
+ *  @param c    The character to write
+ */
+void serial_write_char(unsigned short com, char c);
+
+
+/** serial_write:
+ *  Writes a buffer of characters to the given serial port.
+ *
+ *  @param com  The serial port to write to
+ *  @param buf  The buffer of characters
+ *  @param len  The length of the buffer
+ */
+void serial_write(unsigned short com, char *buf, unsigned int len);
 
 #endif /* INCLUDE_SERIAL_H */

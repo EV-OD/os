@@ -34,7 +34,21 @@
 #define FB_ROWS                 25
 
 /* Assembly Helper */
+
+/* outb:
+     *  Write a byte to an I/O port.
+     *
+     *  @param  port The address of the I/O port
+     *  @param  data The byte to write
+*/
 void outb(unsigned short port, unsigned char data);
+/** inb:
+     *  Read a byte from an I/O port.
+     *
+     *  @param  port The address of the I/O port
+     *  @return      The read byte
+*/
+unsigned char inb(unsigned short port);
 
 /* Framebuffer Functions */
 void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg);

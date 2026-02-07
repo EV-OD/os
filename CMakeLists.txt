@@ -65,7 +65,8 @@ add_custom_target(os_iso ALL DEPENDS os.iso)
 
 # Define the run target
 add_custom_target(run
-    COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -monitor stdio
+    # COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -monitor stdio -serial file:com1.out
+    COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -serial file:com1.out
     DEPENDS os.iso
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running kernel with QEMU"
