@@ -1,10 +1,12 @@
 #include "stdio.h"
 #include "string.h"
 #include "serial.h"
+#include "descriptor.h"
 
 
 void kmain()
 {
+    gdt_init();
 
     serial_begin(9600);
     fb_clear();

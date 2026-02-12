@@ -25,6 +25,15 @@ add_custom_command(
     COMMENT "Compiling stdio.s with NASM"
 )
 
+# Custom command to compile gdt.s with NASM
+add_custom_command(
+    OUTPUT gdt.o
+    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/asm/gdt.s -o gdt.o
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/gdt.s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Compiling gdt.s with NASM"
+)
+
 # Define sources
 file(GLOB_RECURSE SOURCES "c_files/src/*.c")
 
@@ -32,6 +41,7 @@ file(GLOB_RECURSE SOURCES "c_files/src/*.c")
 add_executable(kernel.elf 
     ${CMAKE_CURRENT_BINARY_DIR}/loader.o 
     ${CMAKE_CURRENT_BINARY_DIR}/stdio.o 
+    ${CMAKE_CURRENT_BINARY_DIR}/gdt.o
     ${SOURCES}
 )
 
