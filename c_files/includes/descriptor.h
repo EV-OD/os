@@ -1,10 +1,14 @@
 
+
+//global
 struct gdt {
     unsigned int address;
     unsigned short size;
 } __attribute__((packed));
 
 
+
+//local
 struct idt {
     unsigned short offset_low;
     unsigned short selector;
