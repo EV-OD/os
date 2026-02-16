@@ -2,6 +2,8 @@
 
 This document records every design choice behind the GDT used by the kernel, explains the meaning of each flag and constant, and lists the current hard-coded values together with the rationale for keeping them.
 
+
+
 ## Why We Maintain a GDT
 
 The x86 protected-mode CPU uses a Global Descriptor Table (GDT) to translate segment selectors into base addresses, limits, and access rules. Even when we run the kernel with a flat memory model, the CPU still requires a valid GDT before any segment register is loaded. Without it `lgdt` fails, instructions like `mov %ax, %ds` fault, and interrupts cannot use code/data segments safely.
