@@ -6,6 +6,15 @@
 
 static isr_handler_t handlers[IDT_NUM_ENTRIES];
 
+/* Simple handler to silence the PIT timer (IRQ0) until we add scheduling/timekeeping. */
+static void timer_stub(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
+{
+    (void)cpu;
+    (void)stack;
+    (void)interrupt;
+    /* Nothing else to do; common dispatcher will send EOI. */
+}
+
 /* ISR/IRQ stubs defined in asm/isr.s */
 extern void isr0(void);  extern void isr1(void);  extern void isr2(void);  extern void isr3(void);
 extern void isr4(void);  extern void isr5(void);  extern void isr6(void);  extern void isr7(void);
@@ -78,6 +87,9 @@ void isr_install(void)
     set_isr(45, (unsigned int)irq13);
     set_isr(46, (unsigned int)irq14);
     set_isr(47, (unsigned int)irq15);
+
+    /* Register a default handler for the PIT timer to avoid "Unhandled interrupt: 32" spam. */
+    register_interrupt_handler(32, timer_stub);
 }
 
 void register_interrupt_handler(unsigned int interrupt, isr_handler_t handler)
