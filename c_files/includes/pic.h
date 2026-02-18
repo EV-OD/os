@@ -12,10 +12,18 @@
 #define PIC2_OFFSET 0x28
 
 /* Command words */
-#define PIC_EOI     0x20
-#define ICW1_ICW4   0x01
-#define ICW1_INIT   0x10
-#define ICW4_8086   0x01
+#define PIC_EOI     0x20 /* End of Interrupt command */
+// format of ICW4
+/* 
+ICW4
+Bit 0: 1 = 8086/88 mode, 0 = MCS-80/85 mode
+Bit 1: 1 = Auto EOI, 0 = Normal EOI
+Bit 2: 1 = Buffered mode, 0 = Non-buffered mode
+Bit 3: 1 = Special fully nested mode, 0 = Normal EOI
+*/
+#define ICW1_ICW4   0x01 /* ICW4 is used for initialization of PICs */
+#define ICW1_INIT   0x10 /* Initialization - required! */
+#define ICW4_8086   0x01 /* 8086/88 (MCS-80/85) mode */
 
 void pic_remap(unsigned char offset1, unsigned char offset2);
 void pic_acknowledge(unsigned int interrupt);
