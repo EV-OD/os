@@ -47,4 +47,8 @@ struct stack_state {
 void idt_init(void);
 void idt_set_gate(int num, unsigned int base, unsigned short selector, unsigned char flags);
 
+
+void interrupt_handler(struct cpu_state cpu, struct stack_state stack, unsigned int interrupt);
+
+
 #endif /* INCLUDE_IDT_H */
