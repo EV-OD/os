@@ -1,4 +1,5 @@
 global common_isr_stub
+extern interrupt_handler
 
 
 ; ISR_NOERR - Macro to define an ISR for a CPU exception that does not push an error code
