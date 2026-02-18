@@ -7,6 +7,7 @@ static struct idt_ptr   idt_descriptor;
 /* Implemented in asm/idt.s */
 extern void idt_load(unsigned int idt_ptr_addr);
 
+// Set an entry in the IDT. num is the index of the entry, base is the address of the handler function, selector is the code segment selector in the GDT, and flags specify the type and attributes of the gate.
 void idt_set_gate(int num, unsigned int base, unsigned short selector, unsigned char flags)
 {
     idt[num].offset_low  = base & 0xFFFF;

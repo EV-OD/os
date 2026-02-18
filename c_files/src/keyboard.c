@@ -27,6 +27,7 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
     unsigned char scancode = keyboard_read_scancode();
 
     /* Ignore key releases (high bit set) */
+    // 0x80 is the high bit of the scancode, which indicates a key release event. If this bit is set, we ignore the scancode because we only want to process key press events. This allows us to avoid generating duplicate input for key releases and simplifies the handling of keyboard input in the rest of the system.
     if (scancode & 0x80) {
         return;
     }
