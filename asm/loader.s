@@ -22,3 +22,5 @@ loader:
 .loop:
     jmp .loop
 
+section .note.GNU-stack noalloc noexec nowrite progbits
+

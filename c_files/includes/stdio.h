@@ -68,6 +68,11 @@ int putchar(char c);
 int puts(char *buf);
 int write(char *buf, unsigned int len);
 
+/* Input Functions */
+int getchar(void);           /* Blocking read of one char */
+int readline(char *buf, unsigned int max_len); /* Reads up to newline (max_len includes terminator) */
+int scanf(const char *fmt, ...); /* Minimal scanf: supports %c, %s, %d */
+
 extern volatile unsigned char *framebuffer;
 
 #endif /* INCLUDE_STDIO_H */

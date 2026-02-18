@@ -1,31 +1,32 @@
 /* the name of the entry label */
-ENTRY(loader)    
+ENTRY(loader)
 
+PHDRS {
+    text PT_LOAD FLAGS(0x5); /* R | X */
+    data PT_LOAD FLAGS(0x6); /* R | W */
+}
 
-SECTIONS 
-{
+SECTIONS {
     . = 1M; /* set the starting address to 1MB */
-    .text ALIGN (4): 
-    {
-        *(.text) /* include all .text sections from the input files */
-    }
-     .rodata ALIGN (4): 
-    {
-        *(.rodata) /* include all read only data (.rodata) sections from the input files */
-    }
 
-    .data ALIGN (4): 
-    {
-        *(.data) /* include all .data sections from the input files */
-    }
-    .bss ALIGN (4): 
-    {
-        *(.common) /* include all common sections from the input files */
-        *(.bss) /* include all .bss sections from the input files */
-    }
+    .text ALIGN(4) : {
+        *(.text)
+    } :text
 
-    /DISCARD/ :
-    {
+    .rodata ALIGN(4) : {
+        *(.rodata)
+    } :text
+
+    .data ALIGN(4) : {
+        *(.data)
+    } :data
+
+    .bss ALIGN(4) : {
+        *(.common)
+        *(.bss)
+    } :data
+
+    /DISCARD/ : {
         *(.note.gnu.build-id)
         *(.comment)
     }

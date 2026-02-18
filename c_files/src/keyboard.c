@@ -1,7 +1,6 @@
 #include "keyboard.h"
-#include "stdio.h"
-#include "serial.h"
 #include "pic.h"
+#include "stdio.h"
 
 /* Set 1 scancode to ASCII for main keys; 0 means unmapped. */
 static const char scancode_ascii[] = {
@@ -18,18 +17,41 @@ static const char scancode_ascii[] = {
     ' ', /* Space */
 };
 
-static char line_buffer[128];
-static unsigned int line_pos = 0;
+static unsigned char keyboard_read_scancode(void);
+static char keyboard_scancode_to_ascii(unsigned char scancode);
 
-const char *keyboard_get_buffer(void)
+/* Simple ring buffer for ASCII keypresses. */
+static char char_buffer[128];
+static unsigned int head = 0;
+static unsigned int tail = 0;
+
+static int buffer_is_full(void)
 {
-    line_buffer[line_pos] = '\0';
-    return line_buffer;
+    return ((head + 1) % sizeof(char_buffer)) == tail;
 }
 
-void keyboard_clear_buffer(void)
+static int buffer_is_empty(void)
 {
-    line_pos = 0;
+    return head == tail;
+}
+
+static void buffer_push(char c)
+{
+    if (buffer_is_full()) {
+        return; /* drop if full */
+    }
+    char_buffer[head] = c;
+    head = (head + 1) % sizeof(char_buffer);
+}
+
+static int buffer_pop(void)
+{
+    if (buffer_is_empty()) {
+        return -1;
+    }
+    int c = (int)char_buffer[tail];
+    tail = (tail + 1) % sizeof(char_buffer);
+    return c;
 }
 
 static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
@@ -50,41 +72,15 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         return;
     }
 
-    if (ascii == '\b') {
-        if (line_pos > 0) {
-            line_pos--;
-            serial_write_char('\b');
-            serial_write_char(' ');
-            serial_write_char('\b');
-            cursor_move_back();
-            putchar(' ');
-            cursor_move_back();
-        }
-        return;
-    }
-
-    /* Enter: echo newline and reset buffer */
-    if (ascii == '\n' || ascii == '\r') {
-        line_buffer[line_pos] = '\0';
-        serial_write_char('\n');
-        putchar('\n');
-        line_pos = 0;
-        return;
-    }
-
-    if (line_pos + 1 < sizeof(line_buffer)) {
-        line_buffer[line_pos++] = ascii;
-        serial_write_char(ascii);
-        putchar(ascii);
-    }
+    buffer_push(ascii);
 }
 
-unsigned char keyboard_read_scancode(void)
+static unsigned char keyboard_read_scancode(void)
 {
     return inb(KBD_DATA_PORT);
 }
 
-char keyboard_scancode_to_ascii(unsigned char scancode)
+static char keyboard_scancode_to_ascii(unsigned char scancode)
 {
     if (scancode < sizeof(scancode_ascii)) {
         return scancode_ascii[scancode];
@@ -96,4 +92,23 @@ void keyboard_init(void)
 {
     register_interrupt_handler(33, keyboard_isr);
     pic_clear_mask(1); /* Unmask keyboard IRQ */
+}
+
+int keyboard_available(void)
+{
+    return !buffer_is_empty();
+}
+
+int keyboard_read_char(void)
+{
+    return buffer_pop();
+}
+
+int keyboard_read_char_blocking(void)
+{
+    int c;
+    while ((c = buffer_pop()) == -1) {
+        /* spin */
+    }
+    return c;
 }
