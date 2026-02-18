@@ -1,5 +1,7 @@
 global common_isr_stub
 
+
+; ISR_NOERR - Macro to define an ISR for a CPU exception that does not push an error code
 %macro ISR_NOERR 1
     global isr%1
 isr%1:
@@ -8,6 +10,8 @@ isr%1:
     jmp common_isr_stub
 %endmacro
 
+
+; ISR_ERR - Macro to define an ISR for a CPU exception that pushes an error code
 %macro ISR_ERR 1
     global isr%1
 isr%1:
@@ -15,6 +19,8 @@ isr%1:
     jmp common_isr_stub
 %endmacro
 
+; IRQ - Macro to define an ISR for a hardware interrupt (IRQ)
+; args are IRQ number (0-15) and remapped vector (32-47)
 %macro IRQ 2
     global irq%1
 irq%1:
@@ -35,6 +41,29 @@ section .text
 ; We push all general registers with pusha, then call the C dispatcher:
 ;   interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
 common_isr_stub:
+    ; Interrupt Service Routine (ISR) handler epilogue
+    ; 
+    ; Saves all general purpose registers to create a cpu_state structure,
+    ; then calls the interrupt_handler C function with appropriate arguments.
+    ;
+    ; Stack layout at entry (after interrupt/exception):
+    ;   [ESP+36] = interrupt number
+    ;   [ESP+32] = error code or 0
+    ;   [ESP+28] = return EIP
+    ;   [ESP+24] = return CS
+    ;   [ESP+20] = EFLAGS
+    ;
+    ; Execution flow:
+    ;   1. Save all GP registers (pusha) - creates cpu_state at ESP
+    ;   2. Prepare arguments for interrupt_handler:
+    ;      - arg3: pointer to cpu_state (all saved registers)
+    ;      - arg2: pointer to stack_state (error code, EIP, CS, EFLAGS)
+    ;      - arg1: interrupt number
+    ;   3. Call interrupt_handler(int_num, stack_state*, cpu_state*)
+    ;   4. Clean up stack and restore registers
+    ;   5. Drop error code and interrupt number from stack
+    ;   6. Return from interrupt (iret)
+    ; specific order: AX/EAX, CX/ECX, DX/EDX, BX/EBX, SP/ESP, BP/EBP, SI/ESI, and DI/EDI
     pusha
 
     ; eax holds pointer to cpu_state (top of saved regs)
