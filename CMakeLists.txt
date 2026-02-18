@@ -43,6 +43,15 @@ add_custom_command(
     COMMENT "Compiling idt.s with NASM"
 )
 
+# Custom command to compile isr.s with NASM
+add_custom_command(
+    OUTPUT isr.o
+    COMMAND nasm -f elf32 ${CMAKE_CURRENT_SOURCE_DIR}/asm/isr.s -o isr.o
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/isr.s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Compiling isr.s with NASM"
+)
+
 # Define sources
 file(GLOB_RECURSE SOURCES "c_files/src/*.c")
 
@@ -52,6 +61,7 @@ add_executable(kernel.elf
     ${CMAKE_CURRENT_BINARY_DIR}/stdio.o 
     ${CMAKE_CURRENT_BINARY_DIR}/gdt.o
     ${CMAKE_CURRENT_BINARY_DIR}/idt.o
+    ${CMAKE_CURRENT_BINARY_DIR}/isr.o
     ${SOURCES}
 )
 

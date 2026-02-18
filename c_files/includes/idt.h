@@ -25,16 +25,19 @@ struct idt_ptr {
     unsigned int   base;  /* Linear address of first entry */
 } __attribute__((packed));
 
-/* Register/stack snapshots delivered to C interrupt handlers. */
+/*
+ * Register snapshot as produced by pusha in the common ISR stub.
+ * Order matches pusha: eax, ecx, edx, ebx, esp (original), ebp, esi, edi.
+ */
 struct cpu_state {
     unsigned int eax;
-    unsigned int ebx;
     unsigned int ecx;
     unsigned int edx;
+    unsigned int ebx;
+    unsigned int esp;
+    unsigned int ebp;
     unsigned int esi;
     unsigned int edi;
-    unsigned int ebp;
-    unsigned int esp;
 } __attribute__((packed));
 
 struct stack_state {
@@ -48,7 +51,7 @@ void idt_init(void);
 void idt_set_gate(int num, unsigned int base, unsigned short selector, unsigned char flags);
 
 
-void interrupt_handler(struct cpu_state cpu, struct stack_state stack, unsigned int interrupt);
+void interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt);
 
 
 #endif /* INCLUDE_IDT_H */

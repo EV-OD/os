@@ -10,6 +10,7 @@
 /* Default remap offsets (vector numbers) */
 #define PIC1_OFFSET 0x20
 #define PIC2_OFFSET 0x28
+#define PIC2_END    (PIC2_OFFSET + 7)
 
 /* Command words */
 #define PIC_EOI     0x20 /* End of Interrupt command */
