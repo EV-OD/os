@@ -6,8 +6,8 @@ extern interrupt_handler
 %macro ISR_NOERR 1
     global isr%1
 isr%1:
-    push dword 0          ; dummy error code
     push dword %1         ; interrupt number
+    push dword 0          ; dummy error code to keep a uniform stack layout
     jmp common_isr_stub
 %endmacro
 
@@ -16,7 +16,7 @@ isr%1:
 %macro ISR_ERR 1
     global isr%1
 isr%1:
-    push dword %1         ; interrupt number
+    push dword %1         ; interrupt number (CPU already pushed error code)
     jmp common_isr_stub
 %endmacro
 
@@ -34,7 +34,7 @@ section .text
 
 ; Common handler shared by all ISRs/IRQs.
 ; Stack on entry (top first):
-;   [dummy/CPU error code]
+;   [dummy/CPU error code]   ; 0 for no-error IRQ/ISR, real code for error ISRs
 ;   [interrupt number]
 ;   [eip]
 ;   [cs]
@@ -70,8 +70,8 @@ common_isr_stub:
     ; eax holds pointer to cpu_state (top of saved regs)
     mov eax, esp
     ; push args: interrupt number, stack_state*, cpu_state*
-    push dword [eax + 36]          ; interrupt number
-    lea ecx, [eax + 32]            ; stack_state pointer (error code/eip/cs/eflags)
+    push dword [eax + 32]          ; interrupt number
+    lea ecx, [eax + 36]            ; stack_state pointer (error code/eip/cs/eflags)
     push ecx
     push eax
     call interrupt_handler

@@ -18,6 +18,20 @@ static const char scancode_ascii[] = {
     ' ', /* Space */
 };
 
+static char line_buffer[128];
+static unsigned int line_pos = 0;
+
+const char *keyboard_get_buffer(void)
+{
+    line_buffer[line_pos] = '\0';
+    return line_buffer;
+}
+
+void keyboard_clear_buffer(void)
+{
+    line_pos = 0;
+}
+
 static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
 {
     (void)cpu;
@@ -27,13 +41,39 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
     unsigned char scancode = keyboard_read_scancode();
 
     /* Ignore key releases (high bit set) */
-    // 0x80 is the high bit of the scancode, which indicates a key release event. If this bit is set, we ignore the scancode because we only want to process key press events. This allows us to avoid generating duplicate input for key releases and simplifies the handling of keyboard input in the rest of the system.
     if (scancode & 0x80) {
         return;
     }
 
     char ascii = keyboard_scancode_to_ascii(scancode);
-    if (ascii) {
+    if (!ascii) {
+        return;
+    }
+
+    if (ascii == '\b') {
+        if (line_pos > 0) {
+            line_pos--;
+            serial_write_char('\b');
+            serial_write_char(' ');
+            serial_write_char('\b');
+            cursor_move_back();
+            putchar(' ');
+            cursor_move_back();
+        }
+        return;
+    }
+
+    /* Enter: echo newline and reset buffer */
+    if (ascii == '\n' || ascii == '\r') {
+        line_buffer[line_pos] = '\0';
+        serial_write_char('\n');
+        putchar('\n');
+        line_pos = 0;
+        return;
+    }
+
+    if (line_pos + 1 < sizeof(line_buffer)) {
+        line_buffer[line_pos++] = ascii;
         serial_write_char(ascii);
         putchar(ascii);
     }

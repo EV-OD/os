@@ -10,7 +10,10 @@ This module handles PS/2 keyboard input (scan code set 1) by translating scancod
 1. `keyboard_init()` registers the handler for IRQ1 (vector 33 after PIC remap) and unmasks IRQ1 via `pic_clear_mask(1)`.
 2. On each interrupt, the ISR reads the scancode from port 0x60.
 3. Key releases (scancode with high bit set) are ignored; presses are mapped to ASCII using a simple set-1 table.
-4. Printable characters are echoed to serial (`serial_write_char`) and framebuffer (`putchar`).
+4. A small line buffer (128 bytes) handles basic editing:
+	- Backspace erases the last character on both serial and framebuffer.
+	- Enter emits a newline and clears the buffer.
+	- Printable characters are appended and echoed to serial (`serial_write_char`) and framebuffer (`putchar`).
 
 ## Notes
 

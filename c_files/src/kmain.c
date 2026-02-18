@@ -6,6 +6,7 @@
 #include "isr.h"
 #include "pic.h"
 #include "keyboard.h"
+#include "interrupts.h"
 
 
 void kmain()
@@ -20,8 +21,9 @@ void kmain()
     serial_begin(9600);
     fb_clear();
     cursor_move_home();
+    puts("Type on the keyboard to echo characters.\n");
 
-    __asm__ __volatile__("sti");
+    interrupts_enable();
     
     char buf[128];
     sprintf(buf, "OS loaded. Version: %d. Subsystem: %s. Code: %c", 1, "String", 'A');
