@@ -1,10 +1,10 @@
 # Interrupt Service Routines (ISR) and IRQ Stubs
 
-This note documents how interrupts are dispatched into C code. Stubs live in [asm/isr.s](asm/isr.s), registration and dispatch logic in [c_files/src/isr.c](c_files/src/isr.c), with the public API in [c_files/includes/isr.h](c_files/includes/isr.h).
+This note documents how interrupts are dispatched into C code. Stubs live in [asm/isr.s](../../asm/isr.s), registration and dispatch logic in [c_files/src/isr.c](../../c_files/src/isr.c), with the public API in [c_files/includes/isr.h](../../c_files/includes/isr.h).
 
 ## Stack and Register Layout
 
-Each stub pushes (or receives) an error code and the interrupt number, then jumps to `common_isr_stub` which executes `pusha`. `pusha` saves registers in this order: eax, ecx, edx, ebx, esp (original), ebp, esi, edi. The structures in [c_files/includes/idt.h](c_files/includes/idt.h) mirror that order so the C handler can read them safely.
+Each stub pushes (or receives) an error code and the interrupt number, then jumps to `common_isr_stub` which executes `pusha`. `pusha` saves registers in this order: eax, ecx, edx, ebx, esp (original), ebp, esi, edi. The structures in [c_files/includes/idt.h](../../c_files/includes/idt.h) mirror that order so the C handler can read them safely.
 
 After `pusha`, the common stub passes three arguments to C: `cpu_state*`, `stack_state*` (points to error code, eip, cs, eflags), and the interrupt number.
 

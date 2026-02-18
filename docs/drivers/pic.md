@@ -1,6 +1,6 @@
 # Programmable Interrupt Controller (PIC)
 
-This note explains how the PIC is configured and acknowledged in the kernel. The code lives in [c_files/src/pic.c](c_files/src/pic.c) with the public API in [c_files/includes/pic.h](c_files/includes/pic.h).
+This note explains how the PIC is configured and acknowledged in the kernel. The code lives in [c_files/src/pic.c](../../c_files/src/pic.c) with the public API in [c_files/includes/pic.h](../../c_files/includes/pic.h).
 
 ## Ports and Offsets
 

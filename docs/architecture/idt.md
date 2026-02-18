@@ -4,7 +4,7 @@ This note records how the kernel builds and loads the Interrupt Descriptor Table
 
 ## Entry Layout
 
-Each entry is eight bytes. The structure in [c_files/includes/idt.h](c_files/includes/idt.h) matches the hardware layout exactly:
+Each entry is eight bytes. The structure in [c_files/includes/idt.h](../../c_files/includes/idt.h) matches the hardware layout exactly:
 
 | Bits  | Field        | Meaning |
 |-------|--------------|---------|
@@ -29,11 +29,11 @@ A typical kernel gate will combine `IDT_FLAG_PRESENT | IDT_FLAG_RING0 | IDT_FLAG
 
 ## Initialization Flow
 
-The C helper [c_files/src/idt.c](c_files/src/idt.c) currently wires the minimal scaffolding:
+The C helper [c_files/src/idt.c](../../c_files/src/idt.c) currently wires the minimal scaffolding:
 
 1. Zero all 256 entries so undefined vectors fault cleanly instead of jumping into random memory.
 2. Prepare the IDT pointer (`limit = sizeof(entries) - 1`, `base = &idt[0]`).
-3. Call the assembly helper `idt_load` in [asm/idt.s](asm/idt.s) to execute `lidt`.
+3. Call the assembly helper `idt_load` in [asm/idt.s](../../asm/idt.s) to execute `lidt`.
 
 At this stage no handlers are installed; later steps will populate entries with real ISR/IRQ stubs before enabling interrupts.
 

@@ -2,8 +2,8 @@
 
 This module handles PS/2 keyboard input (scan code set 1) by translating scancodes to ASCII and printing them to both serial and framebuffer output.
 
-- API: [c_files/includes/keyboard.h](c_files/includes/keyboard.h)
-- Implementation: [c_files/src/keyboard.c](c_files/src/keyboard.c)
+- API: [c_files/includes/keyboard.h](../../c_files/includes/keyboard.h)
+- Implementation: [c_files/src/keyboard.c](../../c_files/src/keyboard.c)
 
 ## Flow
 
@@ -19,4 +19,4 @@ This module handles PS/2 keyboard input (scan code set 1) by translating scancod
 
 - Only a subset of scancodes is mapped; unmapped keys return 0 and are ignored.
 - Enter is translated to `\n`; Backspace maps to ASCII 8, and Tab to `\t`.
-- The common dispatcher in [c_files/src/isr.c](c_files/src/isr.c) sends EOIs to the PIC after the handler returns.
+- The common dispatcher in [c_files/src/isr.c](../../c_files/src/isr.c) sends EOIs to the PIC after the handler returns.

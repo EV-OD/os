@@ -25,7 +25,7 @@ Each GDT entry is an 8-byte structure laid out as shown in `struct gdt_entry`:
 | 55          | G              | `(gran & 0x80)` | 1 scales the limit by 4 KiB pages. |
 | 56-63       | base_high      | `(base >> 24) & 0xFF` | Base bits 24-31. |
 
-The helper `gdt_set_entry` in [c_files/src/gdt.c](c_files/src/gdt.c#L21-L58) writes these fields so that callers only provide the base, limit, access byte, and granularity byte.
+The helper `gdt_set_entry` in [c_files/src/gdt.c](../../c_files/src/gdt.c#L21-L58) writes these fields so that callers only provide the base, limit, access byte, and granularity byte.
 
 ## Access Byte Cheatsheet
 
@@ -60,7 +60,7 @@ The GDTR pointer defined by `struct gdt_ptr` holds:
 - `size`: `(sizeof(entry) * count) - 1`. With three descriptors, that is `(8 * 3) - 1 = 23 (0x17)`. The subtraction is required by the `lgdt` instruction.
 - `address`: The linear memory address of the first descriptor (`&gdt[0]`). In C we cast it to `unsigned int` before handing it to assembly.
 
-This pointer is prepared once inside `gdt_init` and then passed to the assembly helper `gdt_load`, implemented in [asm/gdt.s](asm/gdt.s) where the actual `lgdt` and segment register reloads happen.
+This pointer is prepared once inside `gdt_init` and then passed to the assembly helper `gdt_load`, implemented in [asm/gdt.s](../../asm/gdt.s) where the actual `lgdt` and segment register reloads happen.
 
 ## Current Descriptor Table
 
