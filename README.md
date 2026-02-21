@@ -10,6 +10,8 @@ This is a simple experimental operating system kernel written in C and Assembly.
 - `iso/`: ISO directory structure including GRUB configuration
 - `linker/`: Linker script
 - `build/`: Build artifacts
+- `docs/`: Documentation and design notes
+- `cheatsheets/`: Reference materials for x86 architecture, assembly syntax, etc.
 
 ## Prerequisites
 
