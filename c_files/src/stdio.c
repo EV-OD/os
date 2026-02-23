@@ -35,7 +35,6 @@ void fb_clear(void)
     for (unsigned int i = 0; i < FB_ROWS * FB_COLUMNS; i++) {
         fb_write_cell(i * 2, FB_EMPTY_CELL, COLOR_BLACK, COLOR_WHITE);
     }
-    cursor_move_home();
 }
 
 void cursor_move_home(void)

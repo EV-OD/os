@@ -2,7 +2,6 @@
 #include "multiboot.h"
 #include "stdio.h"
 #include "string.h"
-#include "serial.h"
 
 typedef void (*call_module_t)(void);
 
@@ -37,7 +36,6 @@ int module_run(unsigned int eax, unsigned int ebx)
 
     sprintf(buf, "Module loaded at address: 0x%x\n", address_of_module);
     puts(buf);
-    serial_write(buf);
 
     /* Jump to the loaded module */
     call_module_t start_program = (call_module_t) address_of_module;

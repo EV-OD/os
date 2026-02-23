@@ -9,9 +9,6 @@ void display_boot_info(void)
 {
     char buf[128];
 
-    fb_clear();
-    cursor_move_home();
-
     sprintf(buf, "Kernel version: %s\n", KERNEL_VERSION);
     puts(buf);
 

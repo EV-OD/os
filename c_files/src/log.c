@@ -17,9 +17,6 @@ static int log_device = LOG_SERIAL;
 void log_init(int device)
 {
     log_set_device(device);
-    if (device == LOG_SERIAL || device == LOG_ALL) {
-        serial_begin(9600);
-    }
 }
 
 

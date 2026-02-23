@@ -2,7 +2,7 @@
 #define DISPLAY_H
 
 /**
- * Clear the screen, reset the cursor, and print the boot banner.
+ * Print the boot banner to the screen and serial output.
  */
 void display_boot_info(void);
 
