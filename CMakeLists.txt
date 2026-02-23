@@ -52,6 +52,25 @@ add_custom_command(
     COMMENT "Compiling isr.s with NASM"
 )
 
+# Custom command to compile program.s as flat binary with NASM
+add_custom_command(
+    OUTPUT program
+    COMMAND nasm -f bin ${CMAKE_CURRENT_SOURCE_DIR}/asm/program.s -o program
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/program.s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Compiling program.s as flat binary with NASM"
+)
+
+# Copy program to iso/modules
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/iso/modules/program
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/program ${CMAKE_CURRENT_SOURCE_DIR}/iso/modules/program
+    DEPENDS program
+    COMMENT "Copying program module to iso/modules"
+)
+
+add_custom_target(program_module ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/iso/modules/program)
+
 # Define sources
 file(GLOB_RECURSE SOURCES "c_files/src/*.c")
 
@@ -85,7 +104,7 @@ add_custom_command(
             -boot-info-table
             -o os.iso
             ${CMAKE_CURRENT_SOURCE_DIR}/iso
-    DEPENDS kernel.elf
+    DEPENDS kernel.elf ${CMAKE_CURRENT_SOURCE_DIR}/iso/modules/program
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Creating ISO image"
 )
