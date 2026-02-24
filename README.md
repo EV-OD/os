@@ -16,7 +16,6 @@ This is a simple experimental operating system kernel written in C and Assembly.
 ## Prerequisites
 
 To build and run this project, you need the following tools installed:
-
 - GCC (`gcc` with `-m32` support) or a Cross-compiler
 - NASM (Netwide Assembler)
 - CMake
