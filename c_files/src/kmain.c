@@ -2,12 +2,26 @@
 #include "display.h"
 #include "stdio.h"
 #include "module.h"
+#include "rosc.h"
 
 void kmain(unsigned int eax, unsigned int ebx)
 {
+    /* Suppress unused-parameter warnings; parameters are not used while
+     * the rosc compiler shell is the primary entry point (Phase 1). */
+    (void)eax;
+    (void)ebx;
+
     kernel_init();
     fb_clear();
     cursor_move_home();
     display_boot_info();
-    module_run(eax, ebx);
+
+    /* Run the built-in rosc compiler shell (Phase 1).
+     * No file system is needed — the test source is hardcoded inside rosc.c.
+     * module_run() is intentionally skipped for now; re-enable it once the
+     * compiler is migrated to load source files from disk. */
+    rosc_run();
+
+    /* Halt after the compiler shell returns */
+    while (1) {}
 }

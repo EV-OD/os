@@ -4,8 +4,10 @@ project(os_kernel LANGUAGES C)
 # Set 32-bit compilation flags
 set(CMAKE_C_FLAGS "-m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror -fno-pie")
 
-# Add include directory
+# Add include directories (OS headers + compiler headers)
 include_directories(c_files/includes)
+include_directories(compiler/include)
+include_directories(compiler/src)
 
 # Custom command to compile loader.s with NASM
 add_custom_command(
@@ -74,14 +76,19 @@ add_custom_target(program_module ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/iso/mod
 # Define sources
 file(GLOB_RECURSE SOURCES "c_files/src/*.c")
 
+# Compiler (rosc) sources – built directly into the kernel for Phase 1.
+# No file system is available yet; the test source is hardcoded in rosc.c.
+file(GLOB COMPILER_SOURCES "compiler/src/*.c")
+
 # Create the executable (add NASM objects as sources for linking)
-add_executable(kernel.elf 
-    ${CMAKE_CURRENT_BINARY_DIR}/loader.o 
-    ${CMAKE_CURRENT_BINARY_DIR}/stdio.o 
+add_executable(kernel.elf
+    ${CMAKE_CURRENT_BINARY_DIR}/loader.o
+    ${CMAKE_CURRENT_BINARY_DIR}/stdio.o
     ${CMAKE_CURRENT_BINARY_DIR}/gdt.o
     ${CMAKE_CURRENT_BINARY_DIR}/idt.o
     ${CMAKE_CURRENT_BINARY_DIR}/isr.o
     ${SOURCES}
+    ${COMPILER_SOURCES}
 )
 
 # Set linker options (use -Wl to pass flags to the linker when using the C compiler as a linker)

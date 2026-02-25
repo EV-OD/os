@@ -1,0 +1,7 @@
+// arith.ros  --  Phase 1 arithmetic test
+// Tests: literals, operator precedence, parentheses, variable references.
+
+let a: i32 = 10 + 5 * 2       // a = 20  (multiplication before addition)
+let b: i32 = a - 4             // b = 16  (variable reference)
+let c: i32 = (a + b) / 4      // c =  9  (parenthesised sub-expression)
+let d: i32 = c * c - 1        // d = 80  (nested reference, precedence)
