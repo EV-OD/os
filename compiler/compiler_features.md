@@ -258,7 +258,7 @@ compiler/
 
 | Phase | Milestone | Key Deliverables |
 |---|---|---|
-| **Phase 1** | Minimal viable compiler | Lexer, parser, code-gen for integer arithmetic + `print`. Flat binary output. |
+| **Phase 1** | Minimal viable compiler | Lexer, parser, code-gen for integer arithmetic. Flat binary output. |
 | **Phase 2** | Control flow & functions | `if`/`else`, `while`, `for`, user functions, call stack. |
 | **Phase 3** | Type system | Structs, arrays, pointers, type checking, `str` type. |
 | **Phase 4** | Hardware access | Inline asm, `port_in`/`port_out` syscalls, MMIO helpers. |
