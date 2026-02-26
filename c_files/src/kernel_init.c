@@ -6,6 +6,7 @@
 #include "keyboard.h"
 #include "serial.h"
 #include "interrupts.h"
+#include "paging.h"
 
 void kernel_init(void)
 {
@@ -15,5 +16,8 @@ void kernel_init(void)
     pic_remap(PIC1_OFFSET, PIC2_OFFSET);
     keyboard_init();
     serial_begin(9600);
+    /* Paging was enabled in loader.s before kmain; log and verify here
+     * after the serial port is ready so the output is visible. */
+    paging_init();
     interrupts_enable();
 }
