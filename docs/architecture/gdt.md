@@ -64,19 +64,40 @@ This pointer is prepared once inside `gdt_init` and then passed to the assembly 
 
 ## Current Descriptor Table
 
+The GDT now holds six entries after the addition of user-mode segments and the TSS for multitasking support:
+
 | Index | Selector | Purpose | Base | Limit | Access | Granularity | Notes |
 |-------|----------|---------|------|-------|--------|-------------|-------|
 | 0     | 0x00     | Null descriptor | 0x00000000 | 0x00000 | 0x00 | 0x00 | All zeros as mandated by Intel. Selecting it triggers a fault, which catches stray null pointers. |
-| 1     | 0x08     | Kernel code | 0x00000000 | 0xFFFFF | 0x9A | 0xCF | Flat 4 GiB code segment, ring 0 only, executable and readable. The limit plus `G=1` means linear addresses wrap at 4 GiB for segmentation checks. |
-| 2     | 0x10     | Kernel data | 0x00000000 | 0xFFFFF | 0x92 | 0xCF | Flat 4 GiB data/stack segment, ring 0, writable. Shares base/limit with the code segment to keep a flat memory model. |
+| 1     | 0x08     | Kernel code | 0x00000000 | 0xFFFFF | 0x9A | 0xCF | Flat 4 GiB code segment, ring 0 only, executable and readable. |
+| 2     | 0x10     | Kernel data | 0x00000000 | 0xFFFFF | 0x92 | 0xCF | Flat 4 GiB data/stack segment, ring 0, writable. |
+| 3     | 0x18     | User code | 0x00000000 | 0xFFFFF | 0xFA | 0xCF | Code segment for ring-3 processes. DPL=3 (bits 6–5 of access set). Access `0xFA` = `0x9A | 0x60`. |
+| 4     | 0x20     | User data | 0x00000000 | 0xFFFFF | 0xF2 | 0xCF | Data/stack segment for ring-3 processes. DPL=3. Access `0xF2` = `0x92 | 0x60`. |
+| 5     | 0x28     | TSS | &tss | sizeof(tss)−1 | 0x89 | 0x00 | System descriptor (S=0). Type `0x9` = available 32-bit TSS. Filled by `gdt_set_tss_entry()` during `tss_init()`. |
+
+The GDTR `size` field is `(8 * 6) - 1 = 47 (0x2F)`.
+
+### Selector Cheatsheet
+
+When `iret`-ing into ring 3, load segment registers with **RPL=3** (OR with `0x3`):
+
+| Use | Selector |
+|-----|----------|
+| Kernel code (`CS`) | `0x08` |
+| Kernel data (`DS`/`SS`/`ES`) | `0x10` |
+| User code (`CS`) | `0x1B` (0x18 \| 3) |
+| User data (`DS`/`SS`/`ES`) | `0x23` (0x20 \| 3) |
+| Task register (`ltr`) | `0x28` |
 
 ### Why These Hard-Coded Values?
 
-- **Base = 0** for both segments keeps a flat model where logical and linear addresses match. Any higher-half kernel work will modify this.
-- **Limit = 0xFFFFF** together with `G=1` expands to a 4 GiB span, the maximum in 32-bit protected mode. This ensures segmentation does not accidentally clip physical memory the kernel wants.
-- **Access 0x9A / 0x92** match the typical protected-mode template: present, ring 0, code readable and data writable. We deliberately keep DPL at 0 because the kernel has no user mode yet; additional descriptors will be added for ring 3 later.
-- **Granularity 0xCF** enables 32-bit operands and page granularity while keeping long-mode disabled. The lower nibble stays 0xF to match the limit high bits.
-- **Null descriptor** stays zeroed (`gdt_set_entry(0, 0, 0, 0, 0)`) to comply with the architecture and fail fast on erroneous selector loads.
+- **Base = 0** for all flat segments keeps logical and linear addresses identical.
+- **Limit = 0xFFFFF** together with `G=1` expands to a 4 GiB span, the maximum in 32-bit protected mode.
+- **Access 0x9A / 0x92** — kernel segments, DPL=0.
+- **Access 0xFA / 0xF2** — user segments, DPL=3 (`0x9A | 0x60` and `0x92 | 0x60`).
+- **Access 0x89** — TSS system descriptor: present, DPL=0, S=0, type=9 (available 32-bit TSS).
+- **Granularity 0xCF** enables 32-bit operands and page granularity. TSS uses `0x00` (byte granularity, 32-bit default size) because the TSS is a fixed 104-byte struct.
+- **Null descriptor** stays zeroed to comply with the architecture and fail fast on erroneous selector loads.
 
 ## Interaction With Segment Registers
 
@@ -90,6 +111,10 @@ These steps realign every segment register to the new descriptors, ensuring the 
 
 ## Future Extension Checklist
 
-- User-mode support requires ring-3 copies of code/data descriptors (DPL bits set to 3, selectors 0x18 and 0x20).
-- Task State Segment (TSS) descriptors live in the GDT as system entries; reserve space for them when multitasking is introduced.
 - If Physical Address Extension (PAE) or x86-64 are considered, the granularity and long-mode bits need revision and the pointer structure changes size.
+- Multiple TSS entries would be needed for SMP (one per CPU core). Currently the single TSS at index 5 is sufficient for the UP preemptive scheduler.
+
+## Related Documents
+
+- [docs/architecture/tss.md](tss.md) — TSS structure and `esp0` update on every context switch.
+- [docs/kernel/multitasking.md](../kernel/multitasking.md) — How the GDT user segments and TSS fit into the scheduler.
