@@ -13,7 +13,7 @@
  * ========================================================================= */
 
 /* -------------------------------------------------------------------------
- * Page-directory / page-table entry flag bits (Intel Vol. 3A §4.3)
+ * Page-directory / page-table entry flag bits (Intel Vol. 3A Ch 4.3)
  * ------------------------------------------------------------------------- */
 
 #define PDE_PRESENT      (1u << 0)   /* P   – entry is present               */
