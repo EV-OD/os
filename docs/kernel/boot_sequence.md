@@ -26,7 +26,7 @@ This document describes the full initialization flow from GRUB handoff to the fi
 
 ### Phase 2: Kernel Initialization (kernel_init.c)
 
-`kmain()` calls `kernel_init()` which sets up the system in this exact order:
+`kmain()` calls `kernel_init(mb_magic, mb_info)` which sets up the system in this exact order:
 
 | Step | Function | Purpose |
 |------|----------|---------|
@@ -37,7 +37,9 @@ This document describes the full initialization flow from GRUB handoff to the fi
 | 5 | `keyboard_init()` | Register the keyboard ISR on vector 33 (IRQ1) and unmask IRQ1 |
 | 6 | `serial_begin(9600)` | Configure COM1 at 9600 baud: set divisor, 8N1 line format, enable FIFO, set modem control |
 | 7 | `paging_init()` | Log the paging status (CR3, PSE, PDE verification) |
-| 8 | `interrupts_enable()` | Execute `sti` to start handling hardware interrupts |
+| 8 | `pfa_init(mb, phys_start, phys_end)` | Parse the Multiboot mmap, free available frames, reserve first 1 MB + kernel image |
+| 9 | `kheap_init()` | Install a single all-free block in `[0xC0300000, 0xC03FF000)` |
+| 10 | `interrupts_enable()` | Execute `sti` to start handling hardware interrupts |
 
 ### Phase 3: Application Entry (kmain.c)
 

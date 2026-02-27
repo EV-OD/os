@@ -27,6 +27,7 @@
  * ========================================================================= */
 
 #include "pfa.h"
+#include "paging.h"
 #include "log.h"
 
 /* -------------------------------------------------------------------------
@@ -158,6 +159,8 @@ void pfa_init(multiboot_info_t *mb,
     unsigned int region_start, region_end, addr;
     unsigned int total_kb = 0;
 
+    log_info("[pfa] pfa_init entered");
+
     /* ------------------------------------------------------------------
      * Step 1: Mark every frame as "used" (pessimistic default).
      *         We do this by filling every word with 0xFFFFFFFF.
@@ -169,6 +172,8 @@ void pfa_init(multiboot_info_t *mb,
         }
     }
 
+    log_info("[pfa] bitmap filled");
+
     /* ------------------------------------------------------------------
      * Step 2: Walk the Multiboot memory map.  For every region of type
      *         MULTIBOOT_MEMORY_AVAILABLE, free all 4 KB frames within it.
@@ -176,13 +181,29 @@ void pfa_init(multiboot_info_t *mb,
      *  mmap->addr and mmap->len are 64-bit, but on a 32-bit platform we
      *  only care about the lower 32 bits (we cannot address > 4 GB).
      * ------------------------------------------------------------------ */
+    log_info("[pfa] init: phys_kernel=[0x%x, 0x%x)",
+             phys_kernel_start, phys_kernel_end);
+
     if (!(mb->flags & MULTIBOOT_INFO_MEM_MAP)) {
         log_warning("[pfa] Multiboot mmap not provided – cannot initialise PFA");
         return;
     }
 
-    mmap     = (multiboot_memory_map_t *)(unsigned int)mb->mmap_addr;
-    mmap_end = mb->mmap_addr + mb->mmap_length;
+    log_info("[pfa] mmap_addr=0x%x len=%d",
+             mb->mmap_addr, (int)mb->mmap_length);
+
+    /*
+     * mb->mmap_addr is a PHYSICAL address stored by GRUB inside the Multiboot
+     * info structure.  The identity map (PDE[0]) was removed by loader.s
+     * before calling kmain, so we must convert this to a virtual address by
+     * adding KERNEL_VIRTUAL_BASE before dereferencing it as a pointer.
+     * Failure to do this causes an immediate page fault (the machine freezes
+     * at the GRUB screen with no serial output).
+     */
+    mmap     = (multiboot_memory_map_t *)
+               ((unsigned int)mb->mmap_addr + KERNEL_VIRTUAL_BASE);
+    mmap_end = (unsigned int)mb->mmap_addr + KERNEL_VIRTUAL_BASE
+               + mb->mmap_length;
 
     while ((unsigned int)mmap < mmap_end) {
 
@@ -193,7 +214,8 @@ void pfa_init(multiboot_info_t *mb,
             region_end   = region_start +
                            (unsigned int)(mmap->len  & 0xFFFFFFFFu);
 
-            total_kb += (unsigned int)(mmap->len / 1024u);
+            /* Accumulate KB: avoid 64-bit division; shift right by 10. */
+            total_kb += (unsigned int)((mmap->len & 0xFFFFFFFFu) >> 10);
 
             /* Free every aligned 4 KB frame in this region. */
             for (addr  = (region_start + FRAME_SIZE - 1u) & ~(FRAME_SIZE - 1u);

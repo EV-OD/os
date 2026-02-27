@@ -90,9 +90,47 @@ Maps a 4 MB page at page directory index `index` to physical frame `phys_frame`.
 - Fewer TLB misses for the kernel's working set.
 - When finer-grained 4 KB paging is needed (e.g. user-mode processes), page tables can be added per-entry.
 
+## Linker-Script Boundary Symbols
+
+The linker script now exports four symbols so C code can determine the
+exact physical and virtual extents of the kernel image:
+
+| Symbol | Value | Use |
+|--------|-------|-----|
+| `kernel_virtual_start` | `0xC0100000` | First virtual byte of the kernel |
+| `kernel_physical_start` | `0x00100000` | First physical byte of the kernel |
+| `kernel_virtual_end` | `0xC01XXXXX` | One past the last virtual byte |
+| `kernel_physical_end` | `0x001XXXXX` | One past the last physical byte |
+
+These symbols are used by `pfa_init()` to mark the kernel image frames as
+reserved so they are never handed out as free memory.
+
+## Temporary Mapping Window (for new Page Tables)
+
+`pfa_alloc_frame()` returns a physical address.  With paging enabled, that
+address cannot be written to directly — the CPU needs a virtual mapping.
+
+The reserved slot at the end of the kernel page table solves this:
+
+```
+Virtual slot: (768 << 22) | (1023 << 12) = 0xC03FF000
+```
+
+To initialise a new physical frame as a page table:
+
+1. Write the physical address into `page_table[1023]` with `PRESENT | WRITABLE`.
+2. `invlpg(0xC03FF000)` — flush the stale TLB entry.
+3. Write through `0xC03FF000` (CPU transparently redirects to the physical frame).
+4. Clear `page_table[1023]` and `invlpg` again to remove the window.
+5. Install the newly-prepared frame in the page directory.
+
+This breaks the circular "I need a mapping to create a mapping" dependency.
+See `docs/architecture/pfa.md §5` for the full worked example.
+
 ## Future Work
 
 - Add 4 KB page table support for user-mode address spaces.
 - Enable NX (No-Execute) bit when moving to PAE paging.
 - Implement demand paging and page fault handling (ISR 14).
 - Map additional memory regions (e.g. device MMIO above 4 MB).
+- Wire `pfa_alloc_frame()` + temporary mapping into `paging_map_4kb()`.

@@ -80,12 +80,44 @@ static int log_vprintf(char *format, va_list ap)
                     count += strlen(buf);
                     break;
                 }
-                case 'x': {
-                    int x = va_arg(ap, int);
+                case 'u': {
+                    unsigned int u = va_arg(ap, unsigned int);
                     char buf[12];
-                    itoa(x, buf, 16);
+                    itoa((int)u, buf, 10);
                     log_puts(buf);
                     count += strlen(buf);
+                    break;
+                }
+                case 'x': {
+                    /* Format as unsigned hex so addresses >= 0x80000000
+                     * (kernel virtual addresses) are printed correctly.
+                     * itoa() treats them as negative signed ints and shows
+                     * the absolute value, e.g. 0xC0300000 → "3fd00000". */
+                    unsigned int x = va_arg(ap, unsigned int);
+                    char buf[12];
+                    char tmp[9];
+                    int xi = 0;
+                    unsigned int v = x;
+                    if (v == 0) {
+                        tmp[xi++] = '0';
+                    } else {
+                        while (v) {
+                            tmp[xi++] = "0123456789abcdef"[v & 0xFu];
+                            v >>= 4;
+                        }
+                    }
+                    /* reverse the digit string */
+                    {
+                        int lo = 0, hi = xi - 1;
+                        while (lo < hi) {
+                            char t = tmp[lo]; tmp[lo] = tmp[hi]; tmp[hi] = t;
+                            lo++; hi--;
+                        }
+                    }
+                    tmp[xi] = '\0';
+                    strcpy(buf, tmp);
+                    log_puts(buf);
+                    count += xi;
                     break;
                 }
                 case 's': {
