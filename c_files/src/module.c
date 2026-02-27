@@ -1,3 +1,13 @@
+/* =========================================================================
+ * module.c – Multiboot module loader
+ *
+ * Loads and executes a single flat-binary module passed by GRUB via the
+ * Multiboot information structure.  Physical addresses are translated to
+ * the higher-half virtual address space before use.
+ *
+ * See docs/architecture/multiboot.md for details.
+ * ========================================================================= */
+
 #include "module.h"
 #include "multiboot.h"
 #include "paging.h"

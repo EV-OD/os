@@ -1,3 +1,11 @@
+/* =========================================================================
+ * kmain.c – Kernel entry point (called from loader.s after paging is up)
+ *
+ * Receives the Multiboot magic and info pointer from the bootloader,
+ * initialises all subsystems via kernel_init(), then runs the rosc
+ * compiler demo.  See docs/kernel/boot_sequence.md.
+ * ========================================================================= */
+
 #include "kernel_init.h"
 #include "display.h"
 #include "stdio.h"

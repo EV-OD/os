@@ -1,3 +1,12 @@
+/* =========================================================================
+ * kernel_init.c – Kernel boot-time initialisation sequence
+ *
+ * Sets up all core subsystems in dependency order:
+ *   GDT → IDT → ISR stubs → PIC remap → keyboard → serial → paging → sti
+ *
+ * The order matters: see docs/kernel/boot_sequence.md for rationale.
+ * ========================================================================= */
+
 #include "kernel_init.h"
 #include "descriptor.h"
 #include "idt.h"

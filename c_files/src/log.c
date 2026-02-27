@@ -1,9 +1,19 @@
+/* =========================================================================
+ * log.c – Multi-target logging with severity levels
+ *
+ * Output can be directed to the framebuffer, COM1 serial port, or both.
+ * Provides log_debug / log_info / log_warning / log_error convenience
+ * functions that prepend a level tag recognised by the serial-monitor UI.
+ *
+ * See docs/kernel/logging.md for the full API reference.
+ * ========================================================================= */
+
 #include "log.h"
 #include "stdio.h"
 #include "serial.h"
 #include "string.h"
 
-/* va_list support using GCC built-ins */
+/* va_list support using GCC built-ins (no libc) */
 typedef __builtin_va_list va_list;
 #define va_start(ap, last) __builtin_va_start(ap, last)
 #define va_arg(ap, type)   __builtin_va_arg(ap, type)

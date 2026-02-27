@@ -1,3 +1,10 @@
+/* =========================================================================
+ * display.c – Boot-time display helpers
+ *
+ * Prints kernel version and status information to both the framebuffer
+ * and the serial port during startup.
+ * ========================================================================= */
+
 #include "display.h"
 #include "stdio.h"
 #include "string.h"
