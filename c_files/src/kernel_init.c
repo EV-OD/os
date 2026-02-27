@@ -29,6 +29,8 @@
 #include "paging.h"
 #include "pfa.h"
 #include "kheap.h"
+#include "tss.h"
+#include "pit.h"
 #include "log.h"
 
 /*
@@ -76,6 +78,21 @@ void kernel_init(unsigned int mb_magic, multiboot_info_t *mb)
      * no additional page tables are needed at this stage.
      */
     kheap_init();
+
+    /*
+     * Install the TSS descriptor into GDT[5] and load the Task Register.
+     * Must come after gdt_init() (GDT is valid) and kheap_init() (not
+     * strictly required, but ordering is conventional).
+     */
+    tss_init();
+
+    /*
+     * Configure the PIT channel 0 for PIT_TICK_MS millisecond intervals.
+     * This drives the CFS scheduler's preemptive tick.
+     * Ensure IRQ0 is unmasked so timer interrupts actually arrive.
+     */
+    pit_init(PIT_TICK_MS);
+    pic_clear_mask(0);  /* unmask IRQ0 (PIT) */
 
     interrupts_enable();
 }

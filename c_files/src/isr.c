@@ -3,16 +3,23 @@
 #include "serial.h"
 #include "stdio.h"
 #include "string.h"
+#include "sched.h"
+#include "pit.h"
 
 static isr_handler_t handlers[IDT_NUM_ENTRIES];
 
-/* Simple handler to silence the PIT timer (IRQ0) until we add scheduling/timekeeping. */
+/*
+ * PIT timer handler – silences the interrupt until the scheduler is started.
+ * Once sched_start() is called, sched_tick() inside interrupt_handler takes
+ * over the actual scheduling work and this stub is no longer needed.
+ * We keep it registered so unhandled-interrupt spam is suppressed.
+ */
 static void timer_stub(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
 {
     (void)cpu;
     (void)stack;
     (void)interrupt;
-    /* Nothing else to do; common dispatcher will send EOI. */
+    /* EOI is sent by interrupt_handler after all handlers run. */
 }
 
 /* ISR/IRQ stubs defined in asm/isr.s */
@@ -99,21 +106,40 @@ void register_interrupt_handler(unsigned int interrupt, isr_handler_t handler)
     }
 }
 
-void interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
+unsigned int interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
 {
-    (void)cpu;
-    (void)stack;
+    unsigned int new_esp = 0;
 
+    /* Dispatch to a registered C handler first (e.g., keyboard driver). */
     if (interrupt < IDT_NUM_ENTRIES && handlers[interrupt]) {
         handlers[interrupt](cpu, stack, interrupt);
-    } else {
+    } else if (interrupt != 32u) {
+        /* Only log truly unhandled non-timer interrupts to avoid spam. */
         char buf[64];
         sprintf(buf, "Unhandled interrupt: %d", (int)interrupt);
         serial_write(buf);
         serial_write("\r\n");
     }
 
+    /*
+     * CFS scheduler tick – only for PIT (IRQ0 = vector 32).
+     * sched_tick() returns a non-zero new kernel ESP when a context switch
+     * is required; returning it causes common_isr_stub to switch stacks.
+     * EOI must be sent BEFORE the potential stack switch so the PIC is
+     * ready for the next interrupt in the new process context.
+     */
+    if (interrupt == 32u) {
+        if (interrupt >= PIC1_OFFSET && interrupt <= PIC2_END) {
+            pic_acknowledge(interrupt);
+        }
+        new_esp = sched_tick(cpu, interrupt);
+        return new_esp;
+    }
+
+    /* Send EOI for all other hardware interrupts. */
     if (interrupt >= PIC1_OFFSET && interrupt <= PIC2_END) {
         pic_acknowledge(interrupt);
     }
+
+    return 0;  /* no context switch */
 }

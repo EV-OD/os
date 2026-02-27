@@ -51,7 +51,14 @@ void idt_init(void);
 void idt_set_gate(int num, unsigned int base, unsigned short selector, unsigned char flags);
 
 
-void interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt);
+/*
+ * interrupt_handler – called from common_isr_stub in isr.s.
+ *
+ * Returns the new kernel ESP for a context switch, or 0 to stay in the
+ * current process.  The modified common_isr_stub in isr.s checks this
+ * return value and switches ESP before popa + iret if it is non-zero.
+ */
+unsigned int interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt);
 
 
 #endif /* INCLUDE_IDT_H */

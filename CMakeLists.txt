@@ -63,6 +63,23 @@ add_custom_command(
     COMMENT "Compiling program.s as flat binary with NASM"
 )
 
+# User-mode test programs (flat binaries for future GRUB module loading)
+add_custom_command(
+    OUTPUT prog_a
+    COMMAND nasm -f bin ${CMAKE_CURRENT_SOURCE_DIR}/asm/userprogs/prog_a.s -o prog_a
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/userprogs/prog_a.s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Compiling user program A (flat binary)"
+)
+add_custom_command(
+    OUTPUT prog_b
+    COMMAND nasm -f bin ${CMAKE_CURRENT_SOURCE_DIR}/asm/userprogs/prog_b.s -o prog_b
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/asm/userprogs/prog_b.s
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Compiling user program B (flat binary)"
+)
+add_custom_target(user_progs ALL DEPENDS prog_a prog_b)
+
 # Copy program to iso/modules
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/iso/modules/program

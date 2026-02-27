@@ -77,6 +77,14 @@ common_isr_stub:
     call interrupt_handler
     add esp, 12
 
+    ; interrupt_handler returns the new kernel ESP in EAX (0 = no switch).
+    ; If non-zero, switch to the new process's kernel stack before restoring
+    ; registers so that popa + iret execute in the correct process context.
+    test eax, eax
+    jz .no_ctx_switch
+    mov esp, eax          ; switch to new process's saved kernel stack
+.no_ctx_switch:
+
     popa
     add esp, 8                     ; drop error code + interrupt number
     iret

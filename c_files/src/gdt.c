@@ -116,6 +116,77 @@ void gdt_init(void)
      */
     gdt_set_entry(2, 0x00000000, 0xFFFFF, 0x92, 0xCF);
 
+    /*
+     * Entry 3 (index 3) — User Code Segment
+     *   Selector = index * 8 = 0x18  (RPL=3 added by callers: 0x18 | 0x3 = 0x1B)
+     *
+     *   Access byte = 0xFA  (binary: 1111 1010)
+     *     Bit 7   P    = 1    Segment is present
+     *     Bit 6-5 DPL  = 11   Ring 3 (user privilege)
+     *     Bit 4   S    = 1    Code/data descriptor
+     *     Bit 3   E    = 1    Executable (code segment)
+     *     Bit 2   DC   = 0    Non-conforming
+     *     Bit 1   RW   = 1    Readable
+     *     Bit 0   A    = 0    Accessed bit
+     *
+     *   Granularity = 0xCF  (same as kernel code segment)
+     */
+    gdt_set_entry(3, 0x00000000, 0xFFFFF, 0xFA, 0xCF);
+
+    /*
+     * Entry 4 (index 4) — User Data Segment
+     *   Selector = index * 8 = 0x20  (RPL=3 added by callers: 0x20 | 0x3 = 0x23)
+     *
+     *   Access byte = 0xF2  (binary: 1111 0010)
+     *     Bit 7   P    = 1    Segment is present
+     *     Bit 6-5 DPL  = 11   Ring 3 (user privilege)
+     *     Bit 4   S    = 1    Code/data descriptor
+     *     Bit 3   E    = 0    Not executable (data segment)
+     *     Bit 2   DC   = 0    Grows up
+     *     Bit 1   RW   = 1    Writable
+     *     Bit 0   A    = 0    Accessed bit
+     *
+     *   Granularity = 0xCF  (same as kernel data segment)
+     */
+    gdt_set_entry(4, 0x00000000, 0xFFFFF, 0xF2, 0xCF);
+
+    /*
+     * Entry 5 (index 5) — TSS descriptor placeholder.
+     * The actual TSS descriptor is written by tss_init() via gdt_set_tss_entry()
+     * after the TSS structure address is known.  Leave it null for now.
+     */
+    gdt_set_entry(5, 0, 0, 0, 0);
+
     /* Load the GDT and flush segment registers */
     gdt_load((unsigned int)&gp);
+}
+
+/*
+ * gdt_set_tss_entry – write a 32-bit available TSS descriptor into the GDT.
+ *
+ * Called by tss_init() once the address of the TSS structure is known.
+ * The TSS descriptor has the same 8-byte layout as regular segments but:
+ *   • S = 0 (bit 4 of access byte) – it is a "system descriptor"
+ *   • Type = 1001 (bits 3-0 of access byte) – available 32-bit TSS
+ *   • DPL = 0  – only kernel code can load TR (ltr) or call this gate
+ *
+ *   Access byte = 0x89  (1000 1001)
+ *   Granularity = 0x00  (byte-level; TSS size fits in a few hundred bytes)
+ *
+ * @param index  GDT slot to write (must be TSS_GDT_INDEX = 5).
+ * @param base   Linear address of the tss_entry_t struct.
+ * @param limit  sizeof(tss_entry_t) - 1.
+ */
+void gdt_set_tss_entry(int index, unsigned int base, unsigned int limit)
+{
+    /*
+     * 0x89 = 1000 1001
+     *   P=1  (Present)
+     *   DPL=00 (ring 0 only)
+     *   S=0  (system descriptor, not code/data)
+     *   Type=1001 (available 32-bit TSS)
+     *
+     * 0x00 granularity = byte-level, no 32-bit flag needed for TSS.
+     */
+    gdt_set_entry(index, base, limit, 0x89, 0x00);
 }
