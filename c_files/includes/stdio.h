@@ -50,6 +50,22 @@ void outb(unsigned short port, unsigned char data);
 */
 unsigned char inb(unsigned short port);
 
+/** outw:
+     *  Write a 16-bit word to an I/O port.
+     *
+     *  @param  port The address of the I/O port
+     *  @param  data The 16-bit word to write
+*/
+void outw(unsigned short port, unsigned short data);
+
+/** inw:
+     *  Read a 16-bit word from an I/O port.
+     *
+     *  @param  port The address of the I/O port
+     *  @return      The read 16-bit word
+*/
+unsigned short inw(unsigned short port);
+
 /* Framebuffer Functions */
 void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg);
 void fb_move_cursor(unsigned short pos);
