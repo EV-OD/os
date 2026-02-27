@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Toolbar, TerminalOutput, StatusBar, ShortcutsHelp } from './Terminal';
+import { Toolbar, TerminalOutput, StatusBar, ShortcutsHelp } from './TerminalF';
 import { useSerialStream, useKeyboardShortcuts } from '../hooks';
 import { downloadAsFile, filterEntries, ALL_LOG_LEVELS } from '../utils';
 import type { LogLevel } from '../types';
