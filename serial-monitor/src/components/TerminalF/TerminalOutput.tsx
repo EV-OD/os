@@ -7,6 +7,7 @@ interface TerminalOutputProps {
   filterText: string;
   isRegex: boolean;
   levels: Set<LogLevel>;
+  subsystems: Set<string>;
   showTimestamps: boolean;
   onScroll: () => void;
 }
@@ -16,10 +17,10 @@ interface TerminalOutputProps {
  * search highlighting, and hover interactions.
  */
 export const TerminalOutput = forwardRef<HTMLDivElement, TerminalOutputProps>(
-  ({ entries, filterText, isRegex, levels, showTimestamps, onScroll }, ref) => {
+  ({ entries, filterText, isRegex, levels, subsystems, showTimestamps, onScroll }, ref) => {
     const filtered = useMemo(
-      () => filterEntries(entries, filterText, isRegex, levels),
-      [entries, filterText, isRegex, levels],
+      () => filterEntries(entries, filterText, isRegex, levels, subsystems),
+      [entries, filterText, isRegex, levels, subsystems],
     );
 
     const highlightMatch = (text: string): React.ReactNode => {

@@ -23,6 +23,8 @@
 #include "module.h"
 #include "rosc.h"
 #include "kheap.h"
+#include "pfa.h"
+#include "ktest.h"
 #include "log.h"
 
 void kmain(unsigned int eax, unsigned int ebx)
@@ -53,6 +55,15 @@ void kmain(unsigned int eax, unsigned int ebx)
         kfree(c);               /* free right  → heap should be full again*/
         log_info("[kmain] heap smoke test passed");
     }
+
+    /* ------------------------------------------------------------------
+     * Kernel self-tests – run after all subsystems are initialised.
+     * Results are visible on the serial monitor under the [ktest] tag.
+     * ------------------------------------------------------------------ */
+    ktest_init();
+    pfa_run_tests();
+    kheap_run_tests();
+    ktest_report();
 
     /* Run the built-in rosc compiler shell (Phase 1).
      * No file system is needed — the test source is hardcoded inside rosc.c.

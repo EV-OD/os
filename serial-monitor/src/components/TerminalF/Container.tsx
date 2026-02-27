@@ -4,7 +4,7 @@ import { TerminalOutput } from './TerminalOutput';
 import { StatusBar } from './StatusBar';
 import { ShortcutsHelp } from './ShortcutsHelp';
 import { useSerialStream, useKeyboardShortcuts } from '../../hooks';
-import { downloadAsFile, filterEntries, ALL_LOG_LEVELS } from '../../utils';
+import { downloadAsFile, filterEntries, ALL_LOG_LEVELS, getUniqueSubsystems } from '../../utils';
 import type { LogLevel } from '../../types';
 
 /**
@@ -21,6 +21,8 @@ export const Terminal: React.FC = () => {
   const [activeLevels, setActiveLevels] = useState<Set<LogLevel>>(
     () => new Set(ALL_LOG_LEVELS),
   );
+  // Empty set means "show all subsystems" (no filter active)
+  const [activeSubsystems, setActiveSubsystems] = useState<Set<string>>(() => new Set());
   const terminalRef = useRef<HTMLDivElement>(null);
 
   // ─── Hooks ──────────────────────────────────────────────
@@ -59,9 +61,27 @@ export const Terminal: React.FC = () => {
     });
   }, []);
 
+  const handleToggleSubsystem = useCallback((subsystem: string) => {
+    setActiveSubsystems((prev) => {
+      const next = new Set(prev);
+      if (next.has(subsystem)) {
+        next.delete(subsystem);
+      } else {
+        next.add(subsystem);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSubsystems = useCallback(() => {
+    setActiveSubsystems(new Set());
+  }, []);
+
+  const uniqueSubsystems = useMemo(() => getUniqueSubsystems(entries), [entries]);
+
   const filteredCount = useMemo(
-    () => filterEntries(entries, filterText, isRegex, activeLevels).length,
-    [entries, filterText, isRegex, activeLevels],
+    () => filterEntries(entries, filterText, isRegex, activeLevels, activeSubsystems).length,
+    [entries, filterText, isRegex, activeLevels, activeSubsystems],
   );
 
   // ─── Keyboard shortcuts ─────────────────────────────────
@@ -92,6 +112,8 @@ export const Terminal: React.FC = () => {
         showShortcuts={showShortcuts}
         connectionStatus={connectionStatus}
         activeLevels={activeLevels}
+        activeSubsystems={activeSubsystems}
+        uniqueSubsystems={uniqueSubsystems}
         entries={entries}
         onFilterChange={setFilterText}
         onToggleRegex={() => setIsRegex((r) => !r)}
@@ -107,6 +129,8 @@ export const Terminal: React.FC = () => {
         onToggleTimestamps={() => setShowTimestamps((t) => !t)}
         onToggleShortcuts={() => setShowShortcuts((s) => !s)}
         onToggleLevel={handleToggleLevel}
+        onToggleSubsystem={handleToggleSubsystem}
+        onClearSubsystems={handleClearSubsystems}
         onReconnect={reconnect}
       />
 
@@ -116,6 +140,7 @@ export const Terminal: React.FC = () => {
         filterText={filterText}
         isRegex={isRegex}
         levels={activeLevels}
+        subsystems={activeSubsystems}
         showTimestamps={showTimestamps}
         onScroll={handleScroll}
       />

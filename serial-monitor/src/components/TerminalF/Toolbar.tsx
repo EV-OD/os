@@ -2,10 +2,10 @@ import React, { useRef } from 'react';
 import {
   Play, Pause, Trash2, Download, ArrowDownToLine,
   Search, Regex, Clock, Wifi, WifiOff, Keyboard,
-  RotateCcw,
+  RotateCcw, Tag, X,
 } from 'lucide-react';
 import type { LogLevel, ConnectionStatus } from '../../types';
-import { ALL_LOG_LEVELS, LOG_LEVEL_BADGE_COLORS, countByLevel } from '../../utils';
+import { ALL_LOG_LEVELS, LOG_LEVEL_BADGE_COLORS, countByLevel, countBySubsystem } from '../../utils';
 import type { LogEntry } from '../../types';
 
 interface ToolbarProps {
@@ -17,6 +17,8 @@ interface ToolbarProps {
   showShortcuts: boolean;
   connectionStatus: ConnectionStatus;
   activeLevels: Set<LogLevel>;
+  activeSubsystems: Set<string>;
+  uniqueSubsystems: string[];
   entries: LogEntry[];
   onFilterChange: (text: string) => void;
   onToggleRegex: () => void;
@@ -27,6 +29,8 @@ interface ToolbarProps {
   onToggleTimestamps: () => void;
   onToggleShortcuts: () => void;
   onToggleLevel: (level: LogLevel) => void;
+  onToggleSubsystem: (subsystem: string) => void;
+  onClearSubsystems: () => void;
   onReconnect: () => void;
 }
 
@@ -39,6 +43,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   showShortcuts,
   connectionStatus,
   activeLevels,
+  activeSubsystems,
+  uniqueSubsystems,
   entries,
   onFilterChange,
   onToggleRegex,
@@ -49,10 +55,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onToggleTimestamps,
   onToggleShortcuts,
   onToggleLevel,
+  onToggleSubsystem,
+  onClearSubsystems,
   onReconnect,
 }) => {
   const filterRef = useRef<HTMLInputElement>(null);
   const counts = countByLevel(entries);
+  const subCounts = countBySubsystem(entries);
 
   const connectionIcon = connectionStatus === 'connected' ? (
     <Wifi size={14} className="text-green-500" />
@@ -195,6 +204,47 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           );
         })}
       </div>
+
+      {/* Subsystem filter chips (only rendered when subsystems are present) */}
+      {uniqueSubsystems.length > 0 && (
+        <div className="flex flex-wrap items-center px-4 py-1.5 gap-1.5 border-t border-slate-700/50">
+          <span className="text-xs text-slate-500 flex items-center gap-1 mr-1">
+            <Tag size={11} />
+            Tags:
+          </span>
+          {uniqueSubsystems.map((sub) => {
+            const isActive = activeSubsystems.has(sub);
+            const count = subCounts[sub] ?? 0;
+            return (
+              <button
+                key={sub}
+                onClick={() => onToggleSubsystem(sub)}
+                title={`Filter by [${sub}] (${count} entries)`}
+                className={`px-2 py-0.5 rounded text-xs font-mono border transition-all ${
+                  isActive
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                    : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-cyan-700 hover:text-cyan-400'
+                }`}
+              >
+                [{sub}]
+                {count > 0 && (
+                  <span className="ml-1 opacity-60">{count}</span>
+                )}
+              </button>
+            );
+          })}
+          {activeSubsystems.size > 0 && (
+            <button
+              onClick={onClearSubsystems}
+              title="Clear subsystem filter"
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-slate-400 border border-slate-600 hover:border-red-500/50 hover:text-red-400 transition-all"
+            >
+              <X size={10} />
+              clear
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

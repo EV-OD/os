@@ -114,4 +114,14 @@ void kfree(void *ptr);
  */
 void kheap_dump(void);
 
+/* =========================================================================
+ * Test suite entry point
+ * ========================================================================= */
+
+/**
+ * kheap_run_tests - Run the kheap unit-test suite via the ktest framework.
+ * Call after kheap_init(), ktest_init() must have been called first.
+ */
+void kheap_run_tests(void);
+
 #endif /* KHEAP_H */

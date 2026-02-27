@@ -306,9 +306,6 @@ unsigned int pfa_alloc_frame(void)
         }
     }
 
-    log_debug("[pfa] alloc 0x%x (frame %d)",
-              frame_idx * FRAME_SIZE, (int)frame_idx);
-
     return frame_idx * FRAME_SIZE;
 }
 

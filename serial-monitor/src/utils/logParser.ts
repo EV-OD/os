@@ -88,12 +88,18 @@ export function filterEntries(
   text: string,
   isRegex: boolean,
   levels: Set<LogLevel>,
+  subsystems?: Set<string>,
 ): LogEntry[] {
   let result = entries;
 
   // Level filter
   if (levels.size > 0 && levels.size < ALL_LOG_LEVELS.length) {
     result = result.filter((e) => levels.has(e.level));
+  }
+
+  // Subsystem filter  (empty set / undefined = show all)
+  if (subsystems && subsystems.size > 0) {
+    result = result.filter((e) => subsystems.has(e.subsystem));
   }
 
   // Text/regex filter
@@ -125,6 +131,31 @@ export function countByLevel(entries: LogEntry[]): Record<LogLevel, number> {
   };
   for (const e of entries) {
     counts[e.level]++;
+  }
+  return counts;
+}
+
+/**
+ * Collect all unique non-empty subsystem tags present in entries.
+ * Returns a sorted array for stable chip rendering.
+ */
+export function getUniqueSubsystems(entries: LogEntry[]): string[] {
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (e.subsystem) seen.add(e.subsystem);
+  }
+  return Array.from(seen).sort();
+}
+
+/**
+ * Count entries per subsystem tag.
+ */
+export function countBySubsystem(entries: LogEntry[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const e of entries) {
+    if (e.subsystem) {
+      counts[e.subsystem] = (counts[e.subsystem] ?? 0) + 1;
+    }
   }
   return counts;
 }

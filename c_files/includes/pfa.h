@@ -179,4 +179,14 @@ void pfa_clear_frame(unsigned int phys_addr);
  */
 int pfa_test_frame(unsigned int phys_addr);
 
+/* =========================================================================
+ * Test suite entry point
+ * ========================================================================= */
+
+/**
+ * pfa_run_tests - Run the PFA unit-test suite via the ktest framework.
+ * Call after pfa_init(), ktest_init() must have been called first.
+ */
+void pfa_run_tests(void);
+
 #endif /* PFA_H */
