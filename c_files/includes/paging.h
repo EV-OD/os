@@ -4,10 +4,10 @@
 /* =========================================================================
  * paging.h – x86 paging definitions and API
  *
- * The kernel currently uses identity paging with 4 MB pages set up at
- * compile / boot time in loader.s (section 9.2.1).  This header exposes
- * the page-directory entry flag bits, the page_directory symbol that lives
- * in assembly, and a small set of helper functions for future use.
+ * The kernel uses a higher-half layout: virtual addresses 0xC0000000+
+ * map to physical 0x00000000+.  The initial 4 MB page is set up at
+ * boot time in loader.s.  This header exposes the page-directory entry
+ * flag bits, the page_directory symbol from assembly, and helper functions.
  *
  * Reference: Intel Software Developer's Manual Vol. 3A, Chapter 4.
  * ========================================================================= */
@@ -41,6 +41,22 @@
 #define PAGE_TABLE_ENTRIES  1024u
 
 /* -------------------------------------------------------------------------
+ * Higher-half kernel constants
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Virtual base address of the kernel.  Physical address 0x00000000 is
+ * mapped to this virtual address, so phys_to_virt(p) = p + KERNEL_VIRTUAL_BASE
+ * and virt_to_phys(v) = v - KERNEL_VIRTUAL_BASE.
+ */
+#define KERNEL_VIRTUAL_BASE  0xC0000000u
+#define KERNEL_PAGE_INDEX    (KERNEL_VIRTUAL_BASE >> 22)   /* PDE index 768 */
+
+/* Convert between physical and virtual addresses within the kernel mapping. */
+#define PHYS_TO_VIRT(p)  ((void *)((unsigned int)(p) + KERNEL_VIRTUAL_BASE))
+#define VIRT_TO_PHYS(v)  ((unsigned int)(v) - KERNEL_VIRTUAL_BASE)
+
+/* -------------------------------------------------------------------------
  * Types
  * ------------------------------------------------------------------------- */
 
@@ -65,9 +81,10 @@ typedef unsigned int pte_t;
  * ------------------------------------------------------------------------- */
 
 /*
- * The identity-mapped page directory created at compile time in loader.s.
- * Entry i maps virtual 4 MB region [i*4MB, (i+1)*4MB) to the same physical
- * range.  All 1024 entries are populated, covering the full 4 GB space.
+ * The page directory created at compile time in loader.s.
+ * After boot, only entry 768 (KERNEL_PAGE_INDEX) is present, mapping
+ * virtual [0xC0000000, 0xC0400000) to physical [0, 4 MB).
+ * Entry 0 (identity map) is cleared once we reach the higher half.
  */
 extern pde_t page_directory[PAGE_DIR_ENTRIES];
 
@@ -76,11 +93,10 @@ extern pde_t page_directory[PAGE_DIR_ENTRIES];
  * ------------------------------------------------------------------------- */
 
 /**
- * paging_init – verify and log the paging state established by loader.s.
+ * paging_init – verify and log the higher-half paging state.
  *
  * Called from kernel_init() after GDT, IDT and serial are ready so that
- * the log output is visible.  In future phases this function will rebuild
- * the page directory for a higher-half kernel layout.
+ * the log output is visible.
  */
 void paging_init(void);
 
@@ -101,13 +117,15 @@ unsigned int paging_cr3(void);
 void paging_invlpg(void *vaddr);
 
 /**
- * paging_map_4mb – install a single 4 MB identity PDE.
+ * paging_map_4mb – install a single 4 MB PDE mapping.
  *
- * @param index  Page-directory index (0-1023).  Virtual address covered is
- *               [index * 4MB, (index+1) * 4MB).
- * @param flags  Additional flag bits (OR-ed with PDE_4MB_RW internally).
- *               Pass 0 for defaults (present, writable, supervisor only).
+ * @param index      Page-directory index (0-1023).  Virtual address covered is
+ *                   [index * 4MB, (index+1) * 4MB).
+ * @param phys_frame Physical frame number (upper 10 bits of the 4 MB-aligned
+ *                   physical address, i.e. phys_addr >> 22).
+ * @param flags      Additional flag bits (OR-ed with PDE_4MB_RW internally).
+ *                   Pass 0 for defaults (present, writable, supervisor only).
  */
-void paging_map_4mb(unsigned int index, unsigned int flags);
+void paging_map_4mb(unsigned int index, unsigned int phys_frame, unsigned int flags);
 
 #endif /* PAGING_H */

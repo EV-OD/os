@@ -12,7 +12,7 @@ BITS 32
     pop ebx                                 ; ebx = real address of .here
     lea esi, [ebx + (message - .here)]      ; esi = real address of message
 
-    mov edi, 0x000B8000 + (5 * 80 * 2)     ; VGA framebuffer, row 5
+    mov edi, 0xC00B8000 + (5 * 80 * 2)     ; VGA framebuffer (higher-half), row 5
     mov ah, 0x0A                            ; light green on black
 
 .loop:

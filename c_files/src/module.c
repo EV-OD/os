@@ -1,5 +1,6 @@
 #include "module.h"
 #include "multiboot.h"
+#include "paging.h"
 #include "stdio.h"
 #include "string.h"
 
@@ -15,6 +16,10 @@ int module_run(unsigned int eax, unsigned int ebx)
         return -1;
     }
 
+    /*
+     * ebx was already adjusted in loader.s to a virtual address
+     * (physical pointer + KERNEL_VIRTUAL_BASE).  Dereference directly.
+     */
     multiboot_info_t *mbinfo = (multiboot_info_t *) ebx;
 
     /* Check that modules info is available */
@@ -30,9 +35,13 @@ int module_run(unsigned int eax, unsigned int ebx)
         return -3;
     }
 
-    /* Get the address of the first (and only) module */
-    multiboot_module_t *module = (multiboot_module_t *) mbinfo->mods_addr;
-    unsigned int address_of_module = module->mod_start;
+    /*
+     * mods_addr is a physical address inside the multiboot info area.
+     * Add KERNEL_VIRTUAL_BASE to access it through the higher-half mapping.
+     * Similarly, mod_start is a physical load address for the module.
+     */
+    multiboot_module_t *module = (multiboot_module_t *)(mbinfo->mods_addr + KERNEL_VIRTUAL_BASE);
+    unsigned int address_of_module = module->mod_start + KERNEL_VIRTUAL_BASE;
 
     sprintf(buf, "Module loaded at address: 0x%x\n", address_of_module);
     puts(buf);

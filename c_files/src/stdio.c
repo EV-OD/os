@@ -7,7 +7,12 @@ typedef __builtin_va_list va_list;
 #define va_arg(ap, type) __builtin_va_arg(ap, type)
 #define va_end(ap) __builtin_va_end(ap)
 
-volatile unsigned char *framebuffer = (unsigned char *)0x000B8000;
+/*
+ * The VGA text-mode framebuffer is at physical 0x000B8000.
+ * In our higher-half kernel, physical 0x00000000 is mapped to virtual
+ * 0xC0000000, so the framebuffer is at virtual 0xC00B8000.
+ */
+volatile unsigned char *framebuffer = (unsigned char *)0xC00B8000;
 static unsigned short cursor_pos = 0;
 
 static int is_space(char c)
