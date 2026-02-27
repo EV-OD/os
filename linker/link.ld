@@ -17,6 +17,12 @@ SECTIONS {
      */
     . = 0xC0100000;
 
+    /* Export the kernel start addresses so C code (and the PFA) can
+     * determine which physical frames belong to the kernel image and
+     * must not be handed out as free memory. */
+    kernel_virtual_start  = .;
+    kernel_physical_start = . - KERNEL_VIRTUAL_BASE;
+
     .text ALIGN(0x1000) : AT(ADDR(.text) - KERNEL_VIRTUAL_BASE) {
         *(.text)
     } :text
