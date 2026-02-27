@@ -1,215 +1,220 @@
-# Physical Frame Allocator (PFA)
+# Physical Frame Allocator (PFA) – Buddy System
 
-The PFA answers one question: **"Give me the physical address of a free 4 KB block of RAM."**  
-It is the foundation on which the kernel heap, virtual memory, and page-table management are built.
-
----
-
-## 1. How Much Memory Is There?
-
-When the kernel starts, the CPU has no built-in knowledge of how much RAM the machine has.
-GRUB collects that information from the BIOS and passes it through the **Multiboot memory map** (mmap): an array of entries stored in the Multiboot info structure.
-
-### Multiboot mmap entry
-
-```c
-struct multiboot_mmap_entry {
-    uint32_t size;     /* size of this entry (not including this field) */
-    uint64_t addr;     /* start of the memory region                   */
-    uint64_t len;      /* length in bytes                               */
-    uint32_t type;     /* AVAILABLE = 1, RESERVED = 2, ACPI = 3, …    */
-} __attribute__((packed));
-```
-
-Only regions with `type == MULTIBOOT_MEMORY_AVAILABLE` can be used as ordinary RAM.
-
-### The kernel image must be protected
-
-Even "Available" regions contain the kernel's own code and data.  
-If the PFA handed out a frame that holds `kmain`, the next write would overwrite the running kernel.
-
-The linker script exports two **boundary symbols** to mark the kernel image:
-
-```ld
-kernel_virtual_start  = .;               /* virtual address of kernel start */
-kernel_physical_start = . - 0xC0000000; /* physical address of kernel start */
-/* … .text / .rodata / .data / .bss … */
-kernel_virtual_end    = .;
-kernel_physical_end   = . - 0xC0000000;
-```
-
-In C code these are referenced as:
-
-```c
-extern unsigned int kernel_physical_start;
-extern unsigned int kernel_physical_end;
-
-unsigned int phys_start = (unsigned int)&kernel_physical_start;
-unsigned int phys_end   = (unsigned int)&kernel_physical_end;
-```
-
-> **Tip:** The symbols are not real variables. Taking `&symbol` gives you the symbol's *value* (the address), not the address of a storage location. No memory dereference occurs.
+The PFA manages physical RAM at the granularity of 4 KB page frames.
+It uses a **Buddy System** allocator — the same algorithm used by the Linux kernel.
 
 ---
 
-## 2. The Bitmap Data Structure
+## 1. Motivation: Why Buddy over Bitmap?
 
-### Concept
+| Property | Flat Bitmap | Buddy System |
+|----------|-------------|--------------|
+| Allocation speed | O(n) scan | O(log n) – scan orders |
+| Free / merge speed | O(1) | O(log n) – merge chain |
+| Contiguous multi-frame alloc | Difficult | Natural (higher orders) |
+| External fragmentation | High | Low (power-of-2 merging) |
+| BSS footprint (128 MB) | 4 KB bitmap | 384 KB descriptors |
 
-One bit represents one 4 KB physical frame:
+The bitmap is simpler to implement but the buddy system is necessary once you need contiguous allocations for DMA, page tables, and large objects.
 
-| Bit value | Meaning |
-|-----------|---------|
-| `0` | Frame is **free** |
-| `1` | Frame is **used** |
+---
 
-### Storage
+## 2. How the Buddy System Works
+
+### Block sizes (orders)
+
+Physical RAM is divided into blocks whose size is always a power of two times
+the base frame size (4 KB):
+
+| Order | Block size | Frames |
+|-------|-----------|--------|
+| 0 | 4 KB | 1 |
+| 1 | 8 KB | 2 |
+| 2 | 16 KB | 4 |
+| 3 | 32 KB | 8 |
+| … | … | … |
+| 11 | 8 MB | 2 048 |
+| 18 | 1 GB | 262 144 |
+
+A per-order **doubly-linked free list** tracks available blocks:
 
 ```c
-/* pfa.c – static bitmap in .bss (zero-initialised by the loader) */
-static unsigned int pfa_bitmap[PFA_BITMAP_WORDS];  /* 32 768 words = 128 KB */
+static unsigned int free_lists[BUDDY_MAX_ORDER + 1];  /* head frame index */
 ```
 
-| Constant | Value | Derivation |
-|----------|-------|------------|
-| `FRAME_SIZE` | 4 096 | 4 KB per frame |
-| `PFA_MAX_FRAMES` | 1 048 576 | 4 GB / 4 KB |
-| `PFA_BITMAP_WORDS` | 32 768 | 1 048 576 / 32 bits |
+### The XOR Buddy Formula
 
-The bitmap can track up to **4 GB** of physical RAM at a cost of only **128 KB** of kernel BSS.
+Every block has exactly one **buddy** — the adjacent block of the same size
+it can merge with.  Given a block starting at frame index `f` at order `o`:
 
-### Bit manipulation
+$$\text{buddy} = f \oplus 2^o$$
 
-```c
-/* Convert a physical address to a frame index */
-index = phys_addr / FRAME_SIZE;               /* e.g. 0x200000 / 0x1000 = 512 */
+Example: frame 0 at order 3 (8 frames) → buddy = `0 XOR 8 = 8`. ✓  
+Example: frame 8 at order 3 → buddy = `8 XOR 8 = 0`. ✓ (symmetric)
 
-/* Which 32-bit word holds bit 'index'? */
-word  = index / 32;                            /* e.g. 512 / 32 = 16           */
+The XOR flips exactly bit `o` of the frame index, mapping each block to
+its unique partner of the same size.
 
-/* Which bit inside that word? */
-mask  = 1u << (index % 32);                   /* e.g. 1 << (512 % 32) = 1     */
+---
 
-/* Mark used */
-pfa_bitmap[word] |= mask;
+## 3. Allocation (split down)
 
-/* Mark free */
-pfa_bitmap[word] &= ~mask;
+Request: one 4 KB frame (order 0).
 
-/* Test */
-used = (pfa_bitmap[word] & mask) != 0;
+```
+1. Scan free_lists[0], free_lists[1], ... until a non-empty list is found
+   at order k.
+
+2. Pop the head block from free_lists[k].
+
+3. While k > 0:
+     k--
+     buddy = frame_idx + (1 << k)   // upper half of the split
+     push buddy into free_lists[k]  // half goes back to pool
+                                    // lower half continues splitting
+
+4. Return frame_idx * FRAME_SIZE.
+```
+
+Example: only free_lists[3] is non-empty (an 8-frame block at frame 64):
+
+```
+Split order 3 → push frame 68 into free_lists[2]  (frames 68-71)
+Split order 2 → push frame 66 into free_lists[1]  (frames 66-67)
+Split order 1 → push frame 65 into free_lists[0]  (frame  65)
+Return frame 64 (4 KB) to caller.
 ```
 
 ---
 
-## 3. Initialisation Algorithm (`pfa_init`)
+## 4. Deallocation (merge up)
+
+Free a 4 KB frame at physical address `phys_addr`:
 
 ```
-1. Fill every bitmap word with 0xFFFFFFFF  → everything "used" (safe default)
+frame_idx = phys_addr / FRAME_SIZE
+order = 0
 
-2. Walk the Multiboot mmap:
-     for each entry where type == AVAILABLE:
-         for each 4 KB frame within that region:
-             pfa_clear_frame(addr)            → mark free
+loop:
+    buddy = frame_idx XOR (1 << order)
 
-3a. Re-mark the first 1 MB as used:
-     for addr = 0x00000000 → 0x000FFFFF:
-         pfa_set_frame(addr)   (BIOS, I/O, GRUB data, VGA VRAM)
+    if buddy >= BUDDY_MAX_FRAMES         → stop (out of range)
+    if !frames[buddy].present            → stop (buddy is not real RAM)
+    if !frames[buddy].is_free            → stop (buddy is in use)
+    if  frames[buddy].order != order     → stop (buddy is a different-size block)
 
-3b. Re-mark the kernel image as used:
-     for addr = phys_kernel_start → phys_kernel_end:
-         pfa_set_frame(addr)
+    list_remove(order, buddy)
+    frame_idx = min(frame_idx, buddy)    // merged block starts at lower addr
+    order++
+
+list_push(order, frame_idx)
 ```
 
-This "pessimistic start, selective open, re-close reserved" approach ensures holes in the mmap (MMIO, ACPI tables, …) are never given out even if the firmware lists them as available.
+The classic merge pattern for sequential frees 0,1,2,3,4,5,6,7…:
+
+```
+free 0 → order 0  (block [0])
+free 1 → order 1  ([0,1] merged)
+free 2 → order 0  (block [2])
+free 3 → order 2  ([0,1,2,3] merged)
+free 4 → order 0  ...
+free 5 → order 1  ...
+free 6 → order 0  ...
+free 7 → order 3  ([0..7] merged)
+```
+
+This is exactly the binary carry pattern — each power of two triggers a cascade of merges upward.
 
 ---
 
-## 4. Core Functions
-
-### `pfa_alloc_frame()`
+## 5. Per-frame Descriptor (`frame_desc_t`)
 
 ```c
-unsigned int pfa_alloc_frame(void);
+typedef struct {
+    unsigned char  is_free;  /* 1 = head of a free block at 'order'  */
+    unsigned char  order;    /* order of the block  (valid if is_free)*/
+    unsigned char  present;  /* 1 = frame is backed by real hardware RAM */
+    unsigned char  _pad;
+    unsigned int   bl_next;  /* next free block frame index (BUDDY_NONE)*/
+    unsigned int   bl_prev;  /* prev free block frame index (BUDDY_NONE)*/
+} frame_desc_t;              /* sizeof = 12 bytes                        */
 ```
 
-Scans the bitmap for the first `0` bit.
+Only the **head** frame of a free block carries meaningful `is_free`, `order`,
+`bl_next`, `bl_prev` values.  Interior frames have `is_free = 0`.
 
-**Optimisation:** if an entire 32-bit word equals `0xFFFFFFFF`, all 32 frames it covers are full — skip to the next word in one comparison instead of testing 32 individual bits.
+The `present` flag marks frames that exist in real hardware RAM (set during
+`pfa_init` from the Multiboot mmap).  The merge loop checks this before
+coalescing to avoid merging into MMIO holes.
 
-Returns the **physical byte address** of the allocated frame, or `PFA_ALLOC_FAIL` (`0xFFFFFFFF`) if memory is exhausted.
-
-### `pfa_free_frame(phys_addr)`
-
-```c
-void pfa_free_frame(unsigned int phys_addr);
-```
-
-Clears the bitmap bit for the given physical address, returning the frame to the free pool.
-
-### `pfa_free_count()`
-
-```c
-unsigned int pfa_free_count(void);
-```
-
-Returns the number of free frames by counting zero bits (using Kernighan's bit-clearing trick on the inverted bitmap). Useful for boot diagnostics.
+**BSS footprint:** `32768 × 12 = 384 KB` for 128 MB of RAM.
 
 ---
 
-## 5. "Chicken-and-Egg": Accessing a New Frame
-
-`pfa_alloc_frame()` returns a **physical** address.  
-With paging enabled, the CPU only understands **virtual** addresses.
-
-If a new frame needs to be used as a page table (to map other frames into virtual memory), you cannot write to it until it is itself mapped — a circular dependency.
-
-### Solution: a temporary mapping window
-
-The initial kernel page table (PDE[768], covering `0xC0000000–0xC03FFFFF`) has 1024 entries, one per 4 KB virtual page.  
-Reserve the **last entry** (index 1023) as a temporary window:
+## 6. Initialisation (`pfa_init`)
 
 ```
-Virtual slot: (768 << 22) | (1023 << 12) | 0 = 0xC03FF000
+1. Set all free_list heads to BUDDY_NONE.
+   (frame descriptors are zeroed by loader.s - .bss section)
+
+2. Walk the Multiboot mmap.
+   For each AVAILABLE region, for each 4 KB-aligned frame address addr:
+     - Skip addr < 0x100000               (first 1 MB - BIOS/IO)
+     - Skip addr in [kernel_start, kernel_end)  (kernel image)
+     - Skip frame_idx >= BUDDY_MAX_FRAMES  (beyond tracking range)
+     - Set frames[idx].present = 1
+     - Call pfa_free_frame(addr)
+       → inserts at order 0 and merges upward on the fly
+
+3. After all frames are processed the free lists hold the largest
+   power-of-2 blocks that tile the available physical RAM.
 ```
 
-Workflow to turn a new physical frame into a page table:
+This "insert one-by-one with live merging" init is O(n log n) but simple and correct.  For ~8 000 frames (32 MB) the total work is ~100 K operations.
+
+### Boot output (QEMU 32 MB)
 
 ```
-1. pfa_alloc_frame()         → phys_addr (e.g. 0x00500000)
-2. page_table[1023] = phys_addr | PTE_PRESENT | PTE_WRITABLE
-3. invlpg(0xC03FF000)        → flush TLB for the window slot
-4. memset((void*)0xC03FF000, 0, 4096)  → zero-initialise the new table
-                                          (write goes to phys 0x00500000)
-5. page_table[1023] = 0      → remove temporary mapping
-6. page_directory[new_idx] = phys_addr | PDE_PRESENT | ...
-                             → install the new page table permanently
+[pfa] buddy init: kernel phys [0x100000, 0x18c2ac)
+[pfa] total available RAM : ~32255 KB
+[pfa]   order  0 :  1 block(s) x    4 KB =   4 KB free
+[pfa]   order  1 :  1 block(s) x    8 KB =   8 KB free
+[pfa]   order  4 :  1 block(s) x   64 KB =  64 KB free
+[pfa]   order  5 :  2 block(s) x  128 KB = 256 KB free
+[pfa]   order  6 :  2 block(s) x  256 KB = 512 KB free
+[pfa]   order  7 :  1 block(s) x  512 KB = 512 KB free
+[pfa]   order  8 :  1 block(s) x 1024 KB = 1024 KB free
+[pfa]   order  9 :  2 block(s) x 2048 KB = 4096 KB free
+[pfa]   order 10 :  2 block(s) x 4096 KB = 8192 KB free
+[pfa]   order 11 :  2 block(s) x 8192 KB = 16384 KB free
+[pfa] total free frames: 7763  (31052 KB)
 ```
 
 ---
 
-## 6. Files
+## 7. Internal Fragmentation
+
+The Buddy System suffers from **internal fragmentation**: a 5 KB request
+must be served by an order-1 block (8 KB), wasting 3 KB.
+
+Mitigation: the kernel heap (`kheap.c`) sits above the PFA and slices buddy
+blocks into arbitrarily-sized chunks via a first-fit linked-list allocator.
+This way the PFA wastes at most one block per `kmalloc` call.
+
+---
+
+## 8. Files
 
 | File | Role |
 |------|------|
-| `c_files/includes/pfa.h` | Public API, constants, function declarations |
-| `c_files/src/pfa.c` | Bitmap storage, `pfa_init`, `pfa_alloc_frame`, `pfa_free_frame` |
+| `c_files/includes/pfa.h` | Public API, `frame_desc_t`, constants |
+| `c_files/src/pfa.c` | `pfa_init`, `pfa_alloc_frame`, `pfa_free_frame`, `free_lists`, `frames[]` |
 | `linker/link.ld` | Exports `kernel_physical_start` / `kernel_physical_end` |
 
 ---
 
-## 7. Logged Output (boot)
+## 9. Future Work
 
-```
-[pfa] total available RAM: ~31744 KB (7680 free frames)
-[pfa] reserved kernel [0x00100000 – 0x00205000) physical
-[pfa] free frames after init: 7296 (28672 KB)
-```
-
----
-
-## Future Work
-
-- **Buddy system** — replace the first-fit bitmap with an order-sorted free-list for O(log n) allocation and reduced fragmentation.
-- **NUMA awareness** — maintain per-node bitmaps on multi-socket systems.
-- **`pfa_alloc_region(n)`** — allocate `n` *contiguous* frames (needed for DMA, large page tables).
+- `pfa_alloc_frames(n)` — allocate `n` contiguous frames at the natural order (needed for DMA, page table creation).
+- Per-NUMA-node free lists for multi-socket systems.
+- `pfa_alloc_order(o)` — expose higher-order allocation directly to the paging subsystem for huge-page support.

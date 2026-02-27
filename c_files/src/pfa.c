@@ -1,154 +1,141 @@
 /* =========================================================================
- * pfa.c – Physical (Page) Frame Allocator  (bitmap implementation)
+ * pfa.c – Physical (Page) Frame Allocator  (Buddy System)
  *
- * Design decisions
- * ----------------
- * • Bitmap lives in .bss (zero-initialised by the loader).  Each bit
- *   represents one 4 KB physical frame: 0 = free, 1 = used.
- * • The bitmap is written as an array of 32-bit words so that the
- *   first_free() inner loop can skip fully-used words in one comparison.
- * • pfa_init() starts pessimistically: everything is "used".  It then
- *   opens only the regions the Multiboot mmap explicitly reports as
- *   AVAILABLE, and immediately re-closes the first 1 MB plus the kernel
- *   image range.  This guarantees that holes in the mmap (reserved,
- *   ACPI, MMIO …) are never handed out.
+ * Algorithm summary
+ * -----------------
+ * RAM is managed as a set of power-of-2-sized blocks.  A free list is kept
+ * for each order 0..BUDDY_MAX_ORDER.  On allocation the smallest available
+ * block is split down to order 0;  on free the released frame is merged
+ * upward with its XOR-buddy as long as the buddy is also free.
  *
- * Memory layout (typical 32-bit machine with 32 MB QEMU default)
- * ---------------------------------------------------------------
- *   0x00000000 – 0x000FFFFF  (1 MB)   BIOS/ROM/I-O – always reserved
- *   0x00100000 – kernel_physical_end   Kernel image – reserved by init
- *   kernel_physical_end – 0x01FFFFFF  Free physical RAM
+ * Free list representation
+ * ------------------------
+ * Each free LIST NODE is the first frame of the block itself – no separate
+ * allocation needed.  The next/prev indices inside frame_desc_t link the
+ * nodes.  The static frames[] array (in .bss) is the only metadata store.
+ *
+ * Internal fragmentation note
+ * ----------------------------
+ * The Buddy System suffers from internal fragmentation: a request for 5 KB
+ * is satisfied with an 8 KB block (order 1), wasting 3 KB.  For small kernel
+ * objects, the kheap malloc() layer (which slices buddy blocks) mitigates
+ * this.
  *
  * References
  * ----------
- *   • Course notes §10 "Page Frame Allocation"
- *   • OSDev wiki "Page Frame Allocator"
- *   • Intel SDM Vol. 3A Chapter 4 (Paging)
+ *   Course notes section 10, OSDev wiki "Buddy memory allocation",
+ *   Linux mm/page_alloc.c (conceptual reference only)
  * ========================================================================= */
 
 #include "pfa.h"
 #include "paging.h"
 #include "log.h"
 
-/* -------------------------------------------------------------------------
- * Internal bitmap storage
- *
- * Placed in .bss – zeroed by the loader *before* we start.  We immediately
- * set every bit to 1 (used) inside pfa_init() as the safe default, then
- * selectively clear bits for available frames.
- * ------------------------------------------------------------------------- */
-static unsigned int pfa_bitmap[PFA_BITMAP_WORDS];
-
-/* Track the total number of frames known to this PFA instance. */
-static unsigned int pfa_total_frames = 0;
-
 /* =========================================================================
- * Static helpers – bitmap bit manipulation
+ * Static data  (.bss – zero-initialised by loader.s)
  * ========================================================================= */
 
 /*
- * frame_index  – convert a physical address to a frame index.
- *   index = physical_addr / FRAME_SIZE
+ * frames[] – per-frame descriptor array.
+ * 32768 entries * 12 bytes = 384 KB of .bss.
  */
-static inline unsigned int frame_index(unsigned int phys_addr)
+static frame_desc_t frames[BUDDY_MAX_FRAMES];
+
+/*
+ * free_lists[] – head frame-index for each order's free list.
+ * Initialised to BUDDY_NONE in pfa_init().
+ */
+static unsigned int free_lists[BUDDY_MAX_ORDER + 1u];
+
+/* =========================================================================
+ * Free-list helpers  (O(1) push / pop / remove)
+ * ========================================================================= */
+
+/*
+ * list_push – prepend frame_idx to free_lists[order].
+ *
+ * Sets is_free and order fields of the frame descriptor.
+ */
+static void list_push(unsigned int order, unsigned int frame_idx)
 {
-    return phys_addr / FRAME_SIZE;
+    unsigned int old_head = free_lists[order];
+
+    frames[frame_idx].is_free = 1;
+    frames[frame_idx].order   = (unsigned char)order;
+    frames[frame_idx].bl_next = old_head;
+    frames[frame_idx].bl_prev = BUDDY_NONE;
+
+    if (old_head != BUDDY_NONE) {
+        frames[old_head].bl_prev = frame_idx;
+    }
+
+    free_lists[order] = frame_idx;
 }
 
 /*
- * bitmap_word  – which uint32_t word contains frame i's bit.
- *   word = i / 32
+ * list_pop – remove and return the head of free_lists[order].
+ * Returns BUDDY_NONE if the list is empty.
  */
-static inline unsigned int bitmap_word(unsigned int index)
+static unsigned int list_pop(unsigned int order)
 {
-    return index / 32u;
+    unsigned int idx = free_lists[order];
+
+    if (idx == BUDDY_NONE) {
+        return BUDDY_NONE;
+    }
+
+    free_lists[order] = frames[idx].bl_next;
+
+    if (frames[idx].bl_next != BUDDY_NONE) {
+        frames[frames[idx].bl_next].bl_prev = BUDDY_NONE;
+    }
+
+    frames[idx].is_free = 0;
+    return idx;
 }
 
 /*
- * bitmap_bit   – which bit inside that word.
- *   bit = i % 32  →  mask = 1 << bit
+ * list_remove – unlink frame_idx from free_lists[order].
+ * frame_idx must currently be in that list.
  */
-static inline unsigned int bitmap_mask(unsigned int index)
+static void list_remove(unsigned int order, unsigned int frame_idx)
 {
-    return 1u << (index % 32u);
+    unsigned int prev = frames[frame_idx].bl_prev;
+    unsigned int next = frames[frame_idx].bl_next;
+
+    if (prev != BUDDY_NONE) {
+        frames[prev].bl_next = next;
+    } else {
+        /* frame_idx was the head */
+        free_lists[order] = next;
+    }
+
+    if (next != BUDDY_NONE) {
+        frames[next].bl_prev = prev;
+    }
+
+    frames[frame_idx].is_free = 0;
+    frames[frame_idx].bl_next = BUDDY_NONE;
+    frames[frame_idx].bl_prev = BUDDY_NONE;
 }
 
 /* =========================================================================
- * Low-level public bitmap helpers
- * ========================================================================= */
-
-/* -------------------------------------------------------------------------
- * pfa_set_frame – mark a 4 KB frame as "used" (bit = 1).
- * ------------------------------------------------------------------------- */
-void pfa_set_frame(unsigned int phys_addr)
-{
-    unsigned int idx  = frame_index(phys_addr);
-    unsigned int word = bitmap_word(idx);
-    unsigned int mask = bitmap_mask(idx);
-
-    if (word < PFA_BITMAP_WORDS) {
-        pfa_bitmap[word] |= mask;
-    }
-}
-
-/* -------------------------------------------------------------------------
- * pfa_clear_frame – mark a 4 KB frame as "free" (bit = 0).
- * ------------------------------------------------------------------------- */
-void pfa_clear_frame(unsigned int phys_addr)
-{
-    unsigned int idx  = frame_index(phys_addr);
-    unsigned int word = bitmap_word(idx);
-    unsigned int mask = bitmap_mask(idx);
-
-    if (word < PFA_BITMAP_WORDS) {
-        pfa_bitmap[word] &= ~mask;
-    }
-}
-
-/* -------------------------------------------------------------------------
- * pfa_test_frame – query whether a frame is used.
- * Returns 1 if used, 0 if free.
- * ------------------------------------------------------------------------- */
-int pfa_test_frame(unsigned int phys_addr)
-{
-    unsigned int idx  = frame_index(phys_addr);
-    unsigned int word = bitmap_word(idx);
-    unsigned int mask = bitmap_mask(idx);
-
-    if (word >= PFA_BITMAP_WORDS) {
-        return 1;  /* treat out-of-range as "used" */
-    }
-    return (pfa_bitmap[word] & mask) ? 1 : 0;
-}
-
-/* =========================================================================
- * first_free – scan bitmap for the first bit that is 0 (free).
+ * Buddy address calculation
  *
- * Inner optimisation: if an entire 32-bit word equals 0xFFFFFFFF, all 32
- * frames it represents are full – skip to the next word immediately.
+ * For a block whose head is at frame index f at order o:
+ *   buddy_index = f XOR (1 << o)
  *
- * Returns the frame index, or PFA_MAX_FRAMES if none is found.
+ * Proof: the two buddies together form a (o+1)-order-aligned block.  The
+ * lower-addressed block has bit o clear; the upper has it set.  XOR flips
+ * exactly that bit, mapping each block to its partner.
  * ========================================================================= */
-static unsigned int first_free(void)
+static inline unsigned int buddy_of(unsigned int frame_idx, unsigned int order)
 {
-    unsigned int w, b;
-
-    for (w = 0; w < PFA_BITMAP_WORDS; w++) {
-        if (pfa_bitmap[w] == 0xFFFFFFFFu) {
-            continue;   /* all 32 frames in this word are used */
-        }
-        /* At least one free frame in this word – find which bit. */
-        for (b = 0; b < 32u; b++) {
-            if (!(pfa_bitmap[w] & (1u << b))) {
-                return w * 32u + b;   /* frame index */
-            }
-        }
-    }
-    return PFA_MAX_FRAMES;   /* no free frame found */
+    return frame_idx ^ (1u << order);
 }
 
 /* =========================================================================
- * pfa_init – parse Multiboot mmap and initialise the bitmap.
+ * pfa_init
  * ========================================================================= */
 void pfa_init(multiboot_info_t *mb,
               unsigned int phys_kernel_start,
@@ -156,168 +143,284 @@ void pfa_init(multiboot_info_t *mb,
 {
     multiboot_memory_map_t *mmap;
     unsigned int mmap_end;
-    unsigned int region_start, region_end, addr;
+    unsigned int o, addr, idx;
     unsigned int total_kb = 0;
 
-    log_info("[pfa] pfa_init entered");
-
-    /* ------------------------------------------------------------------
-     * Step 1: Mark every frame as "used" (pessimistic default).
-     *         We do this by filling every word with 0xFFFFFFFF.
-     * ------------------------------------------------------------------ */
-    {
-        unsigned int w;
-        for (w = 0; w < PFA_BITMAP_WORDS; w++) {
-            pfa_bitmap[w] = 0xFFFFFFFFu;
-        }
-    }
-
-    log_info("[pfa] bitmap filled");
-
-    /* ------------------------------------------------------------------
-     * Step 2: Walk the Multiboot memory map.  For every region of type
-     *         MULTIBOOT_MEMORY_AVAILABLE, free all 4 KB frames within it.
-     *
-     *  mmap->addr and mmap->len are 64-bit, but on a 32-bit platform we
-     *  only care about the lower 32 bits (we cannot address > 4 GB).
-     * ------------------------------------------------------------------ */
-    log_info("[pfa] init: phys_kernel=[0x%x, 0x%x)",
+    log_info("[pfa] buddy init: kernel phys [0x%x, 0x%x)",
              phys_kernel_start, phys_kernel_end);
 
+    /* ------------------------------------------------------------------
+     * Step 1: Initialise all free lists to empty and zero frame descs.
+     *         frames[] is in .bss so already zero, but be explicit.
+     * ------------------------------------------------------------------ */
+    for (o = 0; o <= BUDDY_MAX_ORDER; o++) {
+        free_lists[o] = BUDDY_NONE;
+    }
+    /* frames[] already zeroed by the loader (.bss); no loop needed. */
+
+    /* ------------------------------------------------------------------
+     * Step 2: Walk Multiboot mmap.  For every AVAILABLE region, mark
+     *         frames as 'present' and free them (buddy merges on the fly).
+     *
+     *  Skip: first 1 MB (BIOS, IVT, VGA VRAM, GRUB data).
+     *  Skip: the kernel image [phys_kernel_start, phys_kernel_end).
+     *  Skip: any frame index >= BUDDY_MAX_FRAMES.
+     * ------------------------------------------------------------------ */
     if (!(mb->flags & MULTIBOOT_INFO_MEM_MAP)) {
-        log_warning("[pfa] Multiboot mmap not provided – cannot initialise PFA");
+        log_warning("[pfa] Multiboot mmap absent - PFA not initialised");
         return;
     }
 
-    log_info("[pfa] mmap_addr=0x%x len=%d",
-             mb->mmap_addr, (int)mb->mmap_length);
-
     /*
-     * mb->mmap_addr is a PHYSICAL address stored by GRUB inside the Multiboot
-     * info structure.  The identity map (PDE[0]) was removed by loader.s
-     * before calling kmain, so we must convert this to a virtual address by
-     * adding KERNEL_VIRTUAL_BASE before dereferencing it as a pointer.
-     * Failure to do this causes an immediate page fault (the machine freezes
-     * at the GRUB screen with no serial output).
+     * mb->mmap_addr is a physical address.  The identity map (PDE[0]) was
+     * removed by loader.s, so add KERNEL_VIRTUAL_BASE before dereferencing.
      */
     mmap     = (multiboot_memory_map_t *)
                ((unsigned int)mb->mmap_addr + KERNEL_VIRTUAL_BASE);
     mmap_end = (unsigned int)mb->mmap_addr + KERNEL_VIRTUAL_BASE
                + mb->mmap_length;
 
+    log_info("[pfa] mmap at virt 0x%x  len %d bytes",
+             (unsigned int)mmap, (int)mb->mmap_length);
+
     while ((unsigned int)mmap < mmap_end) {
 
         if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
 
-            /* Clamp to 32-bit addressable range. */
-            region_start = (unsigned int)(mmap->addr & 0xFFFFFFFFu);
-            region_end   = region_start +
-                           (unsigned int)(mmap->len  & 0xFFFFFFFFu);
+            unsigned int region_start = (unsigned int)(mmap->addr & 0xFFFFFFFFu);
+            unsigned int region_end   = region_start
+                                      + (unsigned int)(mmap->len  & 0xFFFFFFFFu);
 
-            /* Accumulate KB: avoid 64-bit division; shift right by 10. */
             total_kb += (unsigned int)((mmap->len & 0xFFFFFFFFu) >> 10);
 
-            /* Free every aligned 4 KB frame in this region. */
+            /* Align region start up to next 4 KB boundary. */
             for (addr  = (region_start + FRAME_SIZE - 1u) & ~(FRAME_SIZE - 1u);
                  addr  < region_end;
                  addr += FRAME_SIZE) {
 
-                pfa_clear_frame(addr);
-                pfa_total_frames++;
+                /* Skip first 1 MB (BIOS / IVT / VGA / GRUB). */
+                if (addr < 0x100000u) {
+                    continue;
+                }
+
+                /* Skip the kernel image. */
+                if (addr >= phys_kernel_start && addr < phys_kernel_end) {
+                    continue;
+                }
+
+                idx = addr / FRAME_SIZE;
+
+                /* Skip frames beyond our tracking capacity. */
+                if (idx >= BUDDY_MAX_FRAMES) {
+                    continue;
+                }
+
+                /*
+                 * Mark as present so the merge logic can confirm that a
+                 * buddy is a real RAM frame before attempting to coalesce.
+                 */
+                frames[idx].present = 1;
+
+                /*
+                 * pfa_free_frame() inserts at order 0 and merges upward
+                 * with any adjacent free buddy blocks.  Calling it for
+                 * each individual frame performs the "bottom-up coalescing"
+                 * pass that builds the initial buddy free lists efficiently.
+                 */
+                pfa_free_frame(addr);
             }
         }
 
-        /* Advance to the next entry: size field does NOT include itself. */
+        /* Advance: mmap->size does NOT include itself. */
         mmap = (multiboot_memory_map_t *)
                ((unsigned int)mmap + mmap->size + sizeof(mmap->size));
     }
 
-    log_info("[pfa] total available RAM: ~%u KB (%u free frames)",
-             total_kb, pfa_total_frames);
+    log_info("[pfa] total available RAM : ~%d KB", (int)total_kb);
 
-    /* ------------------------------------------------------------------
-     * Step 3a: Re-mark the first 1 MB as "used".
-     *          This covers the real-mode IVT, BIOS data area, VGA memory,
-     *          BIOS ROM, and whatever GRUB put below 1 MB.
-     * ------------------------------------------------------------------ */
-    for (addr = 0; addr < 0x100000u; addr += FRAME_SIZE) {
-        pfa_set_frame(addr);
+    /* Log free list occupancy per order for debugging. */
+    {
+        unsigned int order;
+        for (order = 0; order <= BUDDY_MAX_ORDER; order++) {
+            if (free_lists[order] != BUDDY_NONE) {
+                unsigned int cnt = 0;
+                unsigned int cur = free_lists[order];
+                while (cur != BUDDY_NONE) {
+                    cnt++;
+                    cur = frames[cur].bl_next;
+                }
+                log_info("[pfa]   order %d : %d block(s) x %d KB = %d KB free",
+                         (int)order,
+                         (int)cnt,
+                         (int)((FRAME_SIZE << order) / 1024u),
+                         (int)(cnt * (FRAME_SIZE << order) / 1024u));
+            }
+        }
     }
 
-    /* ------------------------------------------------------------------
-     * Step 3b: Re-mark the kernel image frames as "used".
-     *          Align both boundaries to 4 KB so partial frames are
-     *          also protected.
-     * ------------------------------------------------------------------ */
-    region_start = phys_kernel_start & ~(FRAME_SIZE - 1u);
-    region_end   = (phys_kernel_end + FRAME_SIZE - 1u) & ~(FRAME_SIZE - 1u);
-
-    for (addr = region_start; addr < region_end; addr += FRAME_SIZE) {
-        pfa_set_frame(addr);
-    }
-
-    log_info("[pfa] reserved kernel [0x%x – 0x%x) physical",
-             phys_kernel_start, phys_kernel_end);
-    log_info("[pfa] free frames after init: %u (%u KB)",
-             pfa_free_count(), pfa_free_count() * (FRAME_SIZE / 1024u));
+    log_info("[pfa] total free frames: %d  (%d KB)",
+             (int)pfa_free_count(),
+             (int)(pfa_free_count() * (FRAME_SIZE / 1024u)));
 }
 
 /* =========================================================================
- * pfa_alloc_frame – allocate one free 4 KB physical frame.
+ * pfa_alloc_frame – allocate one 4 KB frame.
  * ========================================================================= */
 unsigned int pfa_alloc_frame(void)
 {
-    unsigned int idx  = first_free();
-    unsigned int phys;
+    unsigned int order, frame_idx, buddy_idx;
 
-    if (idx == PFA_MAX_FRAMES) {
+    /* Find the lowest order with a free block. */
+    for (order = 0; order <= BUDDY_MAX_ORDER; order++) {
+        if (free_lists[order] != BUDDY_NONE) {
+            break;
+        }
+    }
+
+    if (order > BUDDY_MAX_ORDER) {
         log_error("[pfa] pfa_alloc_frame: OUT OF MEMORY");
         return PFA_ALLOC_FAIL;
     }
 
-    /* Mark the frame as used and convert index → physical address. */
-    pfa_bitmap[bitmap_word(idx)] |= bitmap_mask(idx);
-    phys = idx * FRAME_SIZE;
+    /* Pop the block at the found order. */
+    frame_idx = list_pop(order);
 
-    log_debug("[pfa] alloc frame @ phys 0x%x (index %u)", phys, idx);
-    return phys;
+    /*
+     * Split down to order 0.
+     * Each iteration cuts the block in half:
+     *   lower half → frame_idx  (we keep working on this)
+     *   upper half → buddy_idx  (pushed to free_lists[order-1])
+     */
+    while (order > 0u) {
+        order--;
+        /*
+         * The upper half starts exactly 2^order frames above frame_idx.
+         * buddy_of() gives the same result: frame_idx ^ (1<<order).
+         * Since frame_idx is the lower half here, the buddy is always
+         * the upper half (frame_idx + 2^order).
+         */
+        buddy_idx = frame_idx + (1u << order);
+
+        if (buddy_idx < BUDDY_MAX_FRAMES && frames[buddy_idx].present) {
+            list_push(order, buddy_idx);
+        }
+    }
+
+    log_debug("[pfa] alloc 0x%x (frame %d)",
+              frame_idx * FRAME_SIZE, (int)frame_idx);
+
+    return frame_idx * FRAME_SIZE;
 }
 
 /* =========================================================================
- * pfa_free_frame – return a 4 KB physical frame to the free pool.
+ * pfa_free_frame – return a 4 KB frame to the buddy pool.
  * ========================================================================= */
 void pfa_free_frame(unsigned int phys_addr)
 {
-    unsigned int idx = frame_index(phys_addr);
+    unsigned int frame_idx = phys_addr / FRAME_SIZE;
+    unsigned int order     = 0;
+    unsigned int buddy_idx;
 
-    if (bitmap_word(idx) >= PFA_BITMAP_WORDS) {
-        log_warning("[pfa] pfa_free_frame: address 0x%x out of range",
-                    phys_addr);
+    if (frame_idx >= BUDDY_MAX_FRAMES) {
+        log_warning("[pfa] pfa_free_frame: 0x%x out of range", phys_addr);
         return;
     }
 
-    pfa_clear_frame(phys_addr);
-    log_debug("[pfa] free frame @ phys 0x%x (index %u)", phys_addr, idx);
+    /*
+     * Merge loop: at each order, compute the buddy and check whether it
+     * is free AND at the same order.  If yes, remove the buddy from its
+     * free list, pick the lower-addressed frame as the new block head, and
+     * move one order up.  Stop when merging is no longer possible.
+     */
+    while (order < BUDDY_MAX_ORDER) {
+        buddy_idx = buddy_of(frame_idx, order);
+
+        /* Stop if buddy is outside tracked range. */
+        if (buddy_idx >= BUDDY_MAX_FRAMES) {
+            break;
+        }
+
+        /* Stop if buddy is not real RAM. */
+        if (!frames[buddy_idx].present) {
+            break;
+        }
+
+        /* Stop if buddy is not free or is part of a different-order block. */
+        if (!frames[buddy_idx].is_free || frames[buddy_idx].order != order) {
+            break;
+        }
+
+        /* Remove the buddy from its current free list. */
+        list_remove(order, buddy_idx);
+
+        /* The merged block's head is the lower-addressed of the two. */
+        if (buddy_idx < frame_idx) {
+            frame_idx = buddy_idx;
+        }
+
+        order++;
+    }
+
+    /* Insert the (possibly merged) block at its final order. */
+    list_push(order, frame_idx);
 }
 
 /* =========================================================================
- * pfa_free_count – count the number of free frames (O(n) scan).
+ * pfa_free_count – total number of free 4 KB frames.
  *
- * Counts the number of zero bits in the bitmap by using the
- * "popcount of complement" trick: count set bits in ~word.
+ * Walks every free list and sums 2^order frames per block.
  * ========================================================================= */
 unsigned int pfa_free_count(void)
 {
-    unsigned int count = 0;
-    unsigned int w, word;
+    unsigned int order, count = 0;
+    unsigned int cur;
 
-    for (w = 0; w < PFA_BITMAP_WORDS; w++) {
-        word = ~pfa_bitmap[w];   /* invert: 1 now means "free" */
-        /* Kernighan's bit-count trick */
-        while (word) {
-            word &= (word - 1u);
-            count++;
+    for (order = 0; order <= BUDDY_MAX_ORDER; order++) {
+        cur = free_lists[order];
+        while (cur != BUDDY_NONE) {
+            count += (1u << order);
+            cur = frames[cur].bl_next;
         }
     }
     return count;
+}
+
+/* =========================================================================
+ * pfa_set_frame – forcibly mark a frame as used.
+ *
+ * If the frame is the head of a free order-0 block, it is unlinked.
+ * Frame descriptors for other orders are not affected (use pfa_init to
+ * avoid calling this on frames that are part of merged higher-order blocks).
+ * ========================================================================= */
+void pfa_set_frame(unsigned int phys_addr)
+{
+    unsigned int idx = phys_addr / FRAME_SIZE;
+
+    if (idx >= BUDDY_MAX_FRAMES) {
+        return;
+    }
+    if (frames[idx].is_free && frames[idx].order == 0) {
+        list_remove(0, idx);
+    }
+}
+
+/* =========================================================================
+ * pfa_clear_frame – alias for pfa_free_frame.
+ * ========================================================================= */
+void pfa_clear_frame(unsigned int phys_addr)
+{
+    pfa_free_frame(phys_addr);
+}
+
+/* =========================================================================
+ * pfa_test_frame – check whether a specific frame is free.
+ * ========================================================================= */
+int pfa_test_frame(unsigned int phys_addr)
+{
+    unsigned int idx = phys_addr / FRAME_SIZE;
+
+    if (idx >= BUDDY_MAX_FRAMES) {
+        return 1;   /* out of range = treat as used */
+    }
+    return frames[idx].is_free ? 0 : 1;
 }
