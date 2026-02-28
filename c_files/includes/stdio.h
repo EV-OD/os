@@ -84,10 +84,30 @@ int putchar(char c);
 int puts(char *buf);
 int write(char *buf, unsigned int len);
 
+/**
+ * printf – formatted output to the VGA framebuffer.
+ * Supports %d, %x, %s, %c, %%.
+ */
+int printf(const char *fmt, ...);
+
+/**
+ * putchar_color – write a character with a specified foreground colour.
+ * Uses black background. Does NOT advance the cursor (caller controls that).
+ */
+void putchar_color(char c, unsigned char fg);
+
+/**
+ * puts_color – write a string with a specified foreground colour.
+ */
+void puts_color(const char *buf, unsigned char fg);
+
 /* Input Functions */
 int getchar(void);           /* Blocking read of one char */
 int readline(char *buf, unsigned int max_len); /* Reads up to newline (max_len includes terminator) */
 int scanf(const char *fmt, ...); /* Minimal scanf: supports %c, %s, %d */
+
+/* Framebuffer utilities */
+unsigned short fb_get_cursor_pos(void);   /* Returns cursor_pos (byte offset) */
 
 extern volatile unsigned char *framebuffer;
 

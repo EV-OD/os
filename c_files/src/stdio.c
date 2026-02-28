@@ -15,9 +15,46 @@ typedef __builtin_va_list va_list;
 volatile unsigned char *framebuffer = (unsigned char *)0xC00B8000;
 static unsigned short cursor_pos = 0;
 
+/* Total bytes in the VGA framebuffer (80 cols × 25 rows × 2 bytes/cell) */
+#define FB_SIZE  (FB_COLUMNS * FB_ROWS * 2)
+
 static int is_space(char c)
 {
     return c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\f' || c == '\v';
+}
+
+/* -------------------------------------------------------------------------
+ * fb_scroll_up – scroll the entire screen up by one line.
+ * Copies rows 1..24 to rows 0..23, then blanks row 24.
+ * ------------------------------------------------------------------------- */
+static void fb_scroll_up(void)
+{
+    /* Each row is FB_COLUMNS * 2 bytes */
+    unsigned int row_bytes = FB_COLUMNS * 2;
+
+    /* Move rows 1..24 up to 0..23 */
+    memcpy((void *)framebuffer,
+           (const void *)(framebuffer + row_bytes),
+           row_bytes * (FB_ROWS - 1));
+
+    /* Clear the last row */
+    unsigned int last_row_start = row_bytes * (FB_ROWS - 1);
+    for (unsigned int i = 0; i < FB_COLUMNS; i++) {
+        framebuffer[last_row_start + i * 2]     = FB_EMPTY_CELL;
+        framebuffer[last_row_start + i * 2 + 1] = FB_DEFAULT_COLOR;
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * fb_check_scroll – if cursor_pos is past the last row, scroll up.
+ * ------------------------------------------------------------------------- */
+static void fb_check_scroll(void)
+{
+    while (cursor_pos >= FB_SIZE) {
+        fb_scroll_up();
+        cursor_pos -= FB_COLUMNS * 2;
+    }
+    fb_move_cursor(cursor_pos / 2);
 }
 
 void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg)
@@ -91,9 +128,11 @@ int putchar(char c)
 {
     if (c == '\n') {
         cursor_move_newline();
+        fb_check_scroll();
     } else {
         fb_write_cell(cursor_pos, c, COLOR_BLACK, COLOR_WHITE);
         cursor_move_forward();
+        fb_check_scroll();
     }
     return 0;
 }
@@ -296,4 +335,99 @@ int scanf(const char *fmt, ...)
 
     va_end(ap);
     return assigned;
+}
+
+/* =========================================================================
+ * printf – formatted output to the VGA framebuffer.
+ * Uses sprintf to a stack buffer, then puts().
+ * ========================================================================= */
+int printf(const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+
+    /* Reuse sprintf internals (sprintf supports %d, %x, %s, %c, %%) */
+    int len = 0;
+    const char *p = fmt;
+    char *dst = buf;
+
+    while (*p && len < 510) {
+        if (*p == '%') {
+            p++;
+            if (*p == 'd') {
+                int val = va_arg(ap, int);
+                char tmp[16];
+                itoa(val, tmp, 10);
+                for (int i = 0; tmp[i] && len < 510; i++)
+                    dst[len++] = tmp[i];
+            } else if (*p == 'u') {
+                unsigned int val = va_arg(ap, unsigned int);
+                char tmp[16];
+                itoa((int)val, tmp, 10);
+                for (int i = 0; tmp[i] && len < 510; i++)
+                    dst[len++] = tmp[i];
+            } else if (*p == 'x') {
+                unsigned int val = va_arg(ap, unsigned int);
+                char tmp[16];
+                itoa((int)val, tmp, 16);
+                for (int i = 0; tmp[i] && len < 510; i++)
+                    dst[len++] = tmp[i];
+            } else if (*p == 's') {
+                const char *s = va_arg(ap, const char *);
+                if (!s) s = "(null)";
+                while (*s && len < 510)
+                    dst[len++] = *s++;
+            } else if (*p == 'c') {
+                char c = (char)va_arg(ap, int);
+                dst[len++] = c;
+            } else if (*p == '%') {
+                dst[len++] = '%';
+            }
+            p++;
+        } else {
+            dst[len++] = *p++;
+        }
+    }
+    dst[len] = '\0';
+
+    va_end(ap);
+    puts(buf);
+    return len;
+}
+
+/* =========================================================================
+ * putchar_color – write a single character with a specified foreground color.
+ * Background is always black. Handles '\n'. Scrolls as needed.
+ * ========================================================================= */
+void putchar_color(char c, unsigned char fg)
+{
+    if (c == '\n') {
+        cursor_move_newline();
+        fb_check_scroll();
+    } else {
+        /* 3rd param = background (high nibble), 4th = foreground (low nibble) */
+        fb_write_cell(cursor_pos, c, COLOR_BLACK, fg);
+        cursor_move_forward();
+        fb_check_scroll();
+    }
+}
+
+/* =========================================================================
+ * puts_color – write a string with a specified foreground color.
+ * ========================================================================= */
+void puts_color(const char *buf, unsigned char fg)
+{
+    while (*buf) {
+        putchar_color(*buf, fg);
+        buf++;
+    }
+}
+
+/* =========================================================================
+ * fb_get_cursor_pos – return current cursor_pos (byte offset).
+ * ========================================================================= */
+unsigned short fb_get_cursor_pos(void)
+{
+    return cursor_pos;
 }
