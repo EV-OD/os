@@ -1,6 +1,8 @@
 #include "keyboard.h"
 #include "pic.h"
 #include "stdio.h"
+#include "sched.h"
+#include "process.h"
 
 /* -------------------------------------------------------------------------
  * Scan code set 1 → ASCII tables (unshifted and shifted)
@@ -44,12 +46,16 @@ static const char scancode_ascii_shift[] = {
 #define SC_RSHIFT_PRESS   0x36
 #define SC_RSHIFT_RELEASE 0xB6
 #define SC_CAPSLOCK       0x3A
+#define SC_LCTRL_PRESS    0x1D  /* Left Ctrl pressed  */
+#define SC_LCTRL_RELEASE  0x9D  /* Left Ctrl released */
+#define SC_C_KEY          0x2E  /* 'c' key scancode   */
 
 /* -------------------------------------------------------------------------
  * Modifier state
  * ------------------------------------------------------------------------- */
 static int shift_held   = 0;   /* non-zero while either Shift is pressed */
 static int caps_enabled = 0;   /* toggled by Caps Lock                   */
+static int ctrl_held    = 0;   /* non-zero while Ctrl is pressed          */
 
 static unsigned char keyboard_read_scancode(void);
 static char keyboard_scancode_to_ascii(unsigned char scancode, int shifted);
@@ -105,6 +111,14 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         shift_held = 0;
         return;
     }
+    if (scancode == SC_LCTRL_PRESS) {
+        ctrl_held = 1;
+        return;
+    }
+    if (scancode == SC_LCTRL_RELEASE) {
+        ctrl_held = 0;
+        return;
+    }
     if (scancode == SC_CAPSLOCK) {
         caps_enabled = !caps_enabled;
         return;
@@ -113,6 +127,15 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
     /* Ignore other key releases (high bit set) */
     if (scancode & 0x80) {
         return;
+    }
+
+    /* ---- Ctrl+C: signal the current process to terminate ---- */
+    if (ctrl_held && scancode == SC_C_KEY) {
+        process_t *cur = sched_current();
+        if (cur && cur->state != PROC_DEAD) {
+            cur->killed = 1;
+        }
+        return;  /* do not push to the char buffer */
     }
 
     /*

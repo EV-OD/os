@@ -89,6 +89,9 @@ typedef struct process {
     unsigned int    parent_pid;   /**< PID of the process that spawned this   */
     int             waited;       /**< 1 = parent has collected exit_status   */
 
+    /* --- Signal flags ---------------------------------------------------- */
+    volatile int    killed;       /**< Non-zero: process should terminate ASAP */
+
     /* --- Linked list for run queue --------------------------------------- */
     struct process *next;         /**< Next process in the run queue (or NULL)*/
 } process_t;

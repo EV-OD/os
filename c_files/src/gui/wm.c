@@ -15,6 +15,7 @@
 #include "kheap.h"
 #include "string.h"
 #include "log.h"
+#include "process.h"
 
 /* -------------------------------------------------------------------------
  * Internal state
@@ -315,7 +316,16 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
 
             /* Close button? */
             if (hit_close(hit, mx, my)) {
+                /* Save owner pid before destroy invalidates the pointer. */
+                int owner = hit->owner_pid;
                 wm_destroy(hit);
+                /* Signal the owning process to terminate. */
+                if (owner > 0) {
+                    process_t *p = process_find((unsigned int)owner);
+                    if (p && p->state != PROC_DEAD) {
+                        p->killed = 1;  /* process exits cleanly via syscall loop */
+                    }
+                }
                 prev_lbtn = lbtn;
                 return;
             }

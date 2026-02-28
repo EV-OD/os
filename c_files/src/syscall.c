@@ -189,10 +189,23 @@ static int sys_read(struct cpu_state *cpu, struct stack_state *stack)
     /* Block until one character is available.
      * Re-enable interrupts so the keyboard IRQ can fire and fill the buffer,
      * then sleep with hlt until it does.  iret will restore EFLAGS correctly. */
+    process_t *rdcur = sched_current();
     int _c;
     __asm__ volatile("sti");
-    while ((_c = keyboard_read_char()) == -1)
+    while ((_c = keyboard_read_char()) == -1) {
+        if (rdcur && rdcur->killed) {
+            rdcur->exit_status = -1;
+            rdcur->state       = PROC_DEAD;
+            for (;;) __asm__ volatile("hlt");
+        }
         __asm__ volatile("hlt");
+    }
+    /* Check again after waking in case Ctrl+C was the key that did it. */
+    if (rdcur && rdcur->killed) {
+        rdcur->exit_status = -1;
+        rdcur->state       = PROC_DEAD;
+        for (;;) __asm__ volatile("hlt");
+    }
     buf[0] = (char)_c;
     return 1;
 }
@@ -242,6 +255,8 @@ static int sys_gui_open(struct cpu_state *cpu, struct stack_state *stack)
     
     wm_window_t *win = wm_create(x, y, w, h, title ?: "Window");
     if (win) {
+        process_t *cur = sched_current();
+        win->owner_pid = cur ? (int)cur->pid : 0;
         wm_paint_all();
         fb_flush();
     }
@@ -391,9 +406,16 @@ static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
     /* Block until a key is pressed.
      * sti lets keyboard/timer/mouse IRQs fire; hlt sleeps until one does.
      * iret later restores EFLAGS from the saved user frame (IF=1). */
+    process_t *wcur = sched_current();
     int c;
     __asm__ volatile("sti");
-    while ((c = keyboard_read_char()) == -1)
+    while ((c = keyboard_read_char()) == -1) {
+        if (wcur && wcur->killed) {
+            wcur->exit_status = -1;
+            wcur->state       = PROC_DEAD;
+            for (;;) __asm__ volatile("hlt");
+        }
         __asm__ volatile("hlt");
+    }
     return c;
 }
