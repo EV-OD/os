@@ -186,8 +186,14 @@ static int sys_read(struct cpu_state *cpu, struct stack_state *stack)
     if (fd != 0) return -1;  /* only stdin for now */
     if (maxlen <= 0) return 0;
 
-    /* Read one character from keyboard (blocking). */
-    buf[0] = (char)keyboard_read_char_blocking();
+    /* Block until one character is available.
+     * Re-enable interrupts so the keyboard IRQ can fire and fill the buffer,
+     * then sleep with hlt until it does.  iret will restore EFLAGS correctly. */
+    int _c;
+    __asm__ volatile("sti");
+    while ((_c = keyboard_read_char()) == -1)
+        __asm__ volatile("hlt");
+    buf[0] = (char)_c;
     return 1;
 }
 
@@ -382,6 +388,12 @@ static int sys_gui_poll(struct cpu_state *cpu, struct stack_state *stack)
 static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
-    /* Wait for input */
-    return keyboard_read_char_blocking();
+    /* Block until a key is pressed.
+     * sti lets keyboard/timer/mouse IRQs fire; hlt sleeps until one does.
+     * iret later restores EFLAGS from the saved user frame (IF=1). */
+    int c;
+    __asm__ volatile("sti");
+    while ((c = keyboard_read_char()) == -1)
+        __asm__ volatile("hlt");
+    return c;
 }
