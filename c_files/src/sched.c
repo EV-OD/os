@@ -37,6 +37,17 @@ static process_t *run_queue    = (process_t *)0;   /* sorted run queue head  */
 static process_t *current_proc = (process_t *)0;   /* currently running task */
 static unsigned int tick_total = 0;                 /* total timer ticks seen */
 
+/*
+ * Saved kernel-main-thread interrupt-frame ESP.
+ *
+ * When process_wait() is called from the kernel main thread (which is NOT
+ * a scheduled process), we loop with sti;hlt.  When the PIT fires and
+ * current_proc is NULL, sched_tick() saves the kernel interrupt frame here
+ * before switching to a queued process.  When all scheduled processes are
+ * dead, we restore this ESP to return to the hlt in process_wait().
+ */
+static unsigned int kernel_wait_esp = 0;
+
 /* -------------------------------------------------------------------------
  * enqueue_sorted – insert proc into run_queue sorted ascending by vruntime.
  * ------------------------------------------------------------------------- */
@@ -252,9 +263,30 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
     pit_tick();
     tick_total++;
 
-    /* If no process is currently running (should not happen), do nothing. */
+    /*
+     * No process is currently running – we are in the kernel main thread
+     * (e.g. process_wait doing sti;hlt).  If there is a queued process,
+     * save the kernel context and switch to it.
+     */
     if (!current_proc) {
-        return 0;
+        next = dequeue_min();
+        if (!next) return 0;   /* nothing queued, stay in kernel */
+
+        /* Save the kernel main thread's interrupt-frame ESP so we can
+         * return to it later (when all scheduled processes finish). */
+        kernel_wait_esp = (unsigned int)cpu - 16u;
+
+        tss_set_kernel_stack((unsigned int)(next->kstack + PROC_KSTACK_SIZE));
+        if (next->is_user && next->page_dir) {
+            paging_switch_directory(next->page_dir);
+        }
+        next->state  = PROC_RUNNING;
+        current_proc = next;
+
+        log_info("[sched] kernel→proc switch: '%s' pid=%d esp=0x%x",
+                 next->name, (int)next->pid, next->saved_esp);
+
+        return next->saved_esp;
     }
 
     /*
@@ -273,6 +305,19 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
     if (current_proc->state == PROC_DEAD) {
         next = dequeue_min();
         if (!next) {
+            /*
+             * No more scheduled processes.  If we have a saved kernel
+             * context (from process_wait), restore it so the kernel
+             * main thread can resume.
+             */
+            if (kernel_wait_esp) {
+                unsigned int ret_esp = kernel_wait_esp;
+                kernel_wait_esp = 0;
+                current_proc = (process_t *)0;
+                paging_switch_directory(paging_get_kernel_directory());
+                log_info("[sched] all processes done, returning to kernel");
+                return ret_esp;
+            }
             log_error("[sched] all processes dead – halting");
             __asm__ volatile("cli; hlt");
             return 0;
