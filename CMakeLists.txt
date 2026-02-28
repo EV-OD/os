@@ -178,6 +178,7 @@ add_custom_target(run
             -hda ${DISK_IMG}
             -vga std
             -enable-kvm
+            -display gtk,grab-on-hover=on
             -serial file:com1.out
     DEPENDS os.iso disk_img
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
