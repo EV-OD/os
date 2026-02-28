@@ -47,6 +47,8 @@
  * ATA commands
  * ------------------------------------------------------------------------- */
 #define ATA_CMD_READ_SECTORS     0x20   /* Read Sectors (with retry) */
+#define ATA_CMD_WRITE_SECTORS    0x30   /* Write Sectors (with retry) */
+#define ATA_CMD_CACHE_FLUSH      0xE7   /* Flush Cache               */
 #define ATA_CMD_IDENTIFY         0xEC   /* Identify Device           */
 
 /* -------------------------------------------------------------------------
@@ -89,5 +91,18 @@ int ata_init(void);
  * @return       0 on success, -1 on timeout or drive error.
  */
 int ata_read_sectors(unsigned int lba, unsigned char count, void *buf);
+
+/**
+ * ata_write_sectors – write one or more 512-byte sectors from buf.
+ *
+ * Uses LBA28 PIO polling. Blocks until all sectors have been transferred
+ * and issues a cache flush command at the end.
+ *
+ * @param lba    Logical block address of the first sector to write.
+ * @param count  Number of sectors to write (1-255).
+ * @param buf    Source buffer; must be at least count * 512 bytes.
+ * @return       0 on success, -1 on timeout or drive error.
+ */
+int ata_write_sectors(unsigned int lba, unsigned char count, const void *buf);
 
 #endif /* ATA_H */

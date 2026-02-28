@@ -173,3 +173,50 @@ int ata_read_sectors(unsigned int lba, unsigned char count, void *buf)
 
     return 0;
 }
+
+int ata_write_sectors(unsigned int lba, unsigned char count, const void *buf)
+{
+    if (count == 0) {
+        return 0;
+    }
+
+    if (ata_wait_bsy() < 0) {
+        return -1;
+    }
+
+    outb(ATA_PRIMARY_DRIVE_HEAD,
+         (unsigned char)(ATA_DRIVE_MASTER | ((lba >> 24) & 0x0F)));
+
+    outb(ATA_PRIMARY_SECTOR_COUNT, count);
+    outb(ATA_PRIMARY_LBA_LO,  (unsigned char)( lba        & 0xFF));
+    outb(ATA_PRIMARY_LBA_MID, (unsigned char)((lba >>  8) & 0xFF));
+    outb(ATA_PRIMARY_LBA_HI,  (unsigned char)((lba >> 16) & 0xFF));
+
+    outb(ATA_PRIMARY_COMMAND, ATA_CMD_WRITE_SECTORS);
+    ata_400ns_delay();
+
+    const unsigned short *src = (const unsigned short *)buf;
+    unsigned char s;
+    for (s = 0; s < count; s++) {
+        if (ata_wait_bsy() < 0) {
+            return -1;
+        }
+        if (ata_wait_drq() < 0) {
+            return -1;
+        }
+
+        unsigned int w;
+        for (w = 0; w < 256; w++) {
+            outw(ATA_PRIMARY_DATA, src[s * 256 + w]);
+        }
+        
+        // Command finishes after transferring words, but standard mandates delay before BSY read
+        ata_400ns_delay();
+    }
+
+    /* Important: flush drive cache to media */
+    outb(ATA_PRIMARY_COMMAND, ATA_CMD_CACHE_FLUSH);
+    ata_wait_bsy();
+
+    return 0;
+}

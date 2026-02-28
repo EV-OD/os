@@ -165,6 +165,16 @@ typedef struct fat_lfn_entry {
     unsigned short  name3[2];           /**< UTF-16LE characters 12-13            */
 } __attribute__((packed)) fat_lfn_entry_t;
 
+/**
+ * fat_dir_loc_t – Information to locate a specific directory entry on disk.
+ * Used for updating directory entries (like file size updates after writing).
+ */
+typedef struct {
+    unsigned int cluster;
+    unsigned int sector;
+    unsigned int offset;
+} fat_dir_loc_t;
+
 /* =========================================================================
  * Derived filesystem context (computed at mount time)
  * ========================================================================= */
@@ -254,6 +264,7 @@ int fat32_read_cluster(fat32_context_t *ctx, unsigned int cluster, void *buf);
  * Iterates every cluster in the directory's chain.  For each valid 8.3 or
  * LFN entry, calls the user-provided callback.  The callback receives:
  *   - The 8.3 directory entry.
+ *   - The location of the entry.
  *   - The long file name (empty string if no LFN was attached).
  *
  * @param ctx          Filesystem context.
@@ -267,6 +278,7 @@ int fat32_read_cluster(fat32_context_t *ctx, unsigned int cluster, void *buf);
 int fat32_list_dir(fat32_context_t *ctx,
                    unsigned int first_cluster,
                    int (*callback)(const fat_dir_entry_t *entry,
+                                   const fat_dir_loc_t *loc,
                                    const char *lfn,
                                    void *userdata),
                    void *userdata);
@@ -280,12 +292,14 @@ int fat32_list_dir(fat32_context_t *ctx,
  * @param first_cluster First cluster of the directory (0 = FAT12/16 root).
  * @param name          Null-terminated name to look for.
  * @param out           Receives the matching directory entry on success.
+ * @param out_loc       Optional. Receives the disk location of the valid 8.3 entry.
  * @return              0 if found, -1 if not found.
  */
 int fat32_find_in_dir(fat32_context_t *ctx,
                       unsigned int first_cluster,
                       const char *name,
-                      fat_dir_entry_t *out);
+                      fat_dir_entry_t *out,
+                      fat_dir_loc_t *out_loc);
 
 /**
  * fat32_find_path – resolve an absolute path to a directory entry.
@@ -296,11 +310,13 @@ int fat32_find_in_dir(fat32_context_t *ctx,
  * @param ctx   Filesystem context.
  * @param path  Absolute path string.
  * @param out   Receives the final directory entry on success.
+ * @param out_loc Optional. Receives the disk location of the entry.
  * @return      0 on success, -1 if any component is not found.
  */
 int fat32_find_path(fat32_context_t *ctx,
                     const char *path,
-                    fat_dir_entry_t *out);
+                    fat_dir_entry_t *out,
+                    fat_dir_loc_t *out_loc);
 
 /**
  * fat32_read_file – read up to size bytes of a file into buf.
@@ -318,6 +334,30 @@ int fat32_read_file(fat32_context_t *ctx,
                     const fat_dir_entry_t *entry,
                     void *buf,
                     unsigned int size);
+
+/* =========================================================================
+ * Write API Additions
+ * ========================================================================= */
+
+/**
+ * fat32_write_cluster – overwrite an entire cluster with buf.
+ */
+int fat32_write_cluster(fat32_context_t *ctx, unsigned int cluster, const void *buf);
+
+/**
+ * fat32_set_fat_entry – update the FAT table chain for a given cluster.
+ */
+int fat32_set_fat_entry(fat32_context_t *ctx, unsigned int cluster, unsigned int value);
+
+/**
+ * fat32_alloc_cluster – find a free cluster, mark it as EOC, and return it.
+ */
+unsigned int fat32_alloc_cluster(fat32_context_t *ctx);
+
+/**
+ * fat32_update_dir_entry – write a directory entry back to its original location.
+ */
+int fat32_update_dir_entry(fat32_context_t *ctx, const fat_dir_loc_t *loc, const fat_dir_entry_t *entry);
 
 /**
  * fat32_dump_info – log the parsed filesystem parameters to the serial port.
