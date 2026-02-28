@@ -186,25 +186,38 @@ static int sys_read(struct cpu_state *cpu, struct stack_state *stack)
     if (fd != 0) return -1;  /* only stdin for now */
     if (maxlen <= 0) return 0;
 
-    /* Block until one character is available.
-     * Re-enable interrupts so the keyboard IRQ can fire and fill the buffer,
-     * then sleep with hlt until it does.  iret will restore EFLAGS correctly. */
     process_t *rdcur = sched_current();
-    int _c;
-    __asm__ volatile("sti");
-    while ((_c = keyboard_read_char()) == -1) {
-        if (rdcur && rdcur->killed) {
-            rdcur->exit_status = -1;
-            rdcur->state       = PROC_DEAD;
-            for (;;) __asm__ volatile("hlt");
-        }
-        __asm__ volatile("hlt");
+
+    /* Fast path: data already in the ring buffer. */
+    int _c = keyboard_read_char();
+    if (_c != -1) {
+        buf[0] = (char)_c;
+        return 1;
     }
-    /* Check again after waking in case Ctrl+C was the key that did it. */
-    if (rdcur && rdcur->killed) {
-        rdcur->exit_status = -1;
-        rdcur->state       = PROC_DEAD;
-        for (;;) __asm__ volatile("hlt");
+
+    /* Slow path: put process to sleep until keyboard ISR wakes it. */
+    __asm__ volatile("sti");
+    for (;;) {
+        if (rdcur) {
+            if (rdcur->killed) {
+                rdcur->exit_status = -1;
+                rdcur->state       = PROC_DEAD;
+                for (;;) __asm__ volatile("hlt");
+            }
+            /* Re-arm sleep state before each hlt so sched_tick
+             * moves us off the run queue until the keyboard IRQ
+             * calls sched_wake_waiters(WAIT_KEY). */
+            rdcur->state       = PROC_SLEEPING;
+            rdcur->wait_reason = WAIT_KEY;
+        }
+        __asm__ volatile("hlt");  /* sleep until any IRQ wakes the CPU */
+        /* After hlt: either keyboard fired (data in buffer) or timer
+         * rescheduled us.  Check for data. */
+        _c = keyboard_read_char();
+        if (_c != -1) break;
+    }
+    if (rdcur) {
+        rdcur->wait_reason = WAIT_NONE;
     }
     buf[0] = (char)_c;
     return 1;
@@ -407,15 +420,30 @@ static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
      * sti lets keyboard/timer/mouse IRQs fire; hlt sleeps until one does.
      * iret later restores EFLAGS from the saved user frame (IF=1). */
     process_t *wcur = sched_current();
-    int c;
+
+    /* Fast path: key already waiting. */
+    int c = keyboard_read_char();
+    if (c != -1) return c;
+
+    /* Slow path: block until a key arrives or the window is closed. */
     __asm__ volatile("sti");
-    while ((c = keyboard_read_char()) == -1) {
-        if (wcur && wcur->killed) {
-            wcur->exit_status = -1;
-            wcur->state       = PROC_DEAD;
-            for (;;) __asm__ volatile("hlt");
+    for (;;) {
+        if (wcur) {
+            if (wcur->killed) {
+                wcur->exit_status = -1;
+                wcur->state       = PROC_DEAD;
+                for (;;) __asm__ volatile("hlt");
+            }
+            /* Re-arm sleep state before each hlt. */
+            wcur->state       = PROC_SLEEPING;
+            wcur->wait_reason = WAIT_KEY;
         }
         __asm__ volatile("hlt");
+        c = keyboard_read_char();
+        if (c != -1) break;
+    }
+    if (wcur) {
+        wcur->wait_reason = WAIT_NONE;
     }
     return c;
 }

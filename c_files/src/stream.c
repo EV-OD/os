@@ -104,9 +104,9 @@ int stream_getchar(stream_t *s)
     /* Spin-wait until data is available or EOF */
     while (s->count == 0) {
         if (s->closed) return -1;
-        /* Yield CPU — this will get preempted by the scheduler's
-         * PIT IRQ0, giving other tasks CPU time. */
-        __asm__ volatile("hlt");
+        /* Enable interrupts so the PIT/keyboard can fire, then sleep.
+         * Without sti the CPU would spin with IRQs masked and freeze. */
+        __asm__ volatile("sti; hlt");
     }
 
     char c = s->buf[s->head];

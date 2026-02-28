@@ -96,6 +96,27 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt);
 process_t *sched_current(void);
 
 /**
+ * sched_wake_waiters – wake all processes sleeping with the given wait_reason.
+ *
+ * Moves matching processes from the sleeping list back into the CFS run queue.
+ * Safe to call from interrupt context (keyboard ISR, etc.).
+ *
+ * @param reason  The wait_reason_t value to match (e.g. WAIT_KEY).
+ */
+void sched_wake_waiters(int reason);
+
+/**
+ * sched_wake_process – unconditionally wake a specific sleeping process.
+ *
+ * If @p proc is in PROC_SLEEPING state it is moved to the run queue.
+ * Used when a process is killed via wm close-button or Ctrl+C so it
+ * can check its killed flag and exit via the syscall loop.
+ *
+ * @param proc  The process to wake.
+ */
+void sched_wake_process(process_t *proc);
+
+/**
  * sched_dump – log the current state of the run queue (for debugging).
  */
 void sched_dump(void);

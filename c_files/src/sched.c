@@ -33,9 +33,10 @@
 /* -------------------------------------------------------------------------
  * Module-private state
  * ------------------------------------------------------------------------- */
-static process_t *run_queue    = (process_t *)0;   /* sorted run queue head  */
-static process_t *current_proc = (process_t *)0;   /* currently running task */
-static unsigned int tick_total = 0;                 /* total timer ticks seen */
+static process_t *run_queue     = (process_t *)0;   /* sorted run queue head  */
+static process_t *sleeping_queue = (process_t *)0;  /* PROC_SLEEPING list     */
+static process_t *current_proc  = (process_t *)0;   /* currently running task */
+static unsigned int tick_total  = 0;                 /* total timer ticks seen */
 
 /*
  * Saved kernel-main-thread interrupt-frame ESP.
@@ -47,6 +48,34 @@ static unsigned int tick_total = 0;                 /* total timer ticks seen */
  * dead, we restore this ESP to return to the hlt in process_wait().
  */
 static unsigned int kernel_wait_esp = 0;
+
+/* -------------------------------------------------------------------------
+ * push_sleeping – append proc to the sleeping_queue singly-linked list.
+ * ------------------------------------------------------------------------- */
+static void push_sleeping(process_t *proc)
+{
+    proc->state = PROC_SLEEPING;
+    proc->next  = sleeping_queue;
+    sleeping_queue = proc;
+}
+
+/* -------------------------------------------------------------------------
+ * remove_from_sleeping – unlink proc from sleeping_queue.
+ * Returns 1 if found and removed, 0 if not in the list.
+ * ------------------------------------------------------------------------- */
+static int remove_from_sleeping(process_t *proc)
+{
+    process_t **pp = &sleeping_queue;
+    while (*pp) {
+        if (*pp == proc) {
+            *pp = proc->next;
+            proc->next = (process_t *)0;
+            return 1;
+        }
+        pp = &(*pp)->next;
+    }
+    return 0;
+}
 
 /* -------------------------------------------------------------------------
  * enqueue_sorted – insert proc into run_queue sorted ascending by vruntime.
@@ -114,9 +143,10 @@ static unsigned int min_vruntime(void)
  * ------------------------------------------------------------------------- */
 void sched_init(void)
 {
-    run_queue    = (process_t *)0;
-    current_proc = (process_t *)0;
-    tick_total   = 0;
+    run_queue      = (process_t *)0;
+    sleeping_queue = (process_t *)0;
+    current_proc   = (process_t *)0;
+    tick_total     = 0;
     log_info("[sched] CFS scheduler initialised");
 }
 
@@ -147,6 +177,64 @@ void sched_add(process_t *proc)
 process_t *sched_current(void)
 {
     return current_proc;
+}
+
+/* -------------------------------------------------------------------------
+ * sched_wake_waiters – wake all sleeping processes with the given reason.
+ *
+ * Moves matching processes from sleeping_queue back into the CFS run queue.
+ * Also handles the race where the process is still current_proc (timer not
+ * yet fired to move it to sleeping_queue).
+ *
+ * Safe to call from interrupt context (keyboard ISR).
+ * ------------------------------------------------------------------------- */
+void sched_wake_waiters(int reason)
+{
+    /* Race: current_proc may have set SLEEPING but timer hasn't fired yet. */
+    if (current_proc &&
+        current_proc->state == PROC_SLEEPING &&
+        (int)current_proc->wait_reason == reason) {
+        current_proc->state       = PROC_RUNNABLE;
+        current_proc->wait_reason = WAIT_NONE;
+        /* Timer will re-enqueue on next tick since state != SLEEPING. */
+    }
+
+    /* Scan the proper sleeping list. */
+    process_t **pp = &sleeping_queue;
+    while (*pp) {
+        process_t *p = *pp;
+        if ((int)p->wait_reason == reason) {
+            *pp = p->next;          /* unlink from sleeping_queue */
+            p->wait_reason = WAIT_NONE;
+            p->next = (process_t *)0;
+            enqueue_sorted(p);      /* sets state = RUNNABLE, inserts in run_queue */
+        } else {
+            pp = &p->next;
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * sched_wake_process – unconditionally wake a specific sleeping process.
+ * ------------------------------------------------------------------------- */
+void sched_wake_process(process_t *proc)
+{
+    if (!proc) return;
+
+    /* Race: still current_proc, timer hasn't moved it yet. */
+    if (proc == current_proc) {
+        if (proc->state == PROC_SLEEPING) {
+            proc->state       = PROC_RUNNABLE;
+            proc->wait_reason = WAIT_NONE;
+        }
+        return;
+    }
+
+    /* Try to remove from sleeping_queue and enqueue. */
+    if (remove_from_sleeping(proc)) {
+        proc->wait_reason = WAIT_NONE;
+        enqueue_sorted(proc);   /* state set to RUNNABLE inside */
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -299,8 +387,9 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
     current_proc->saved_esp = (unsigned int)cpu - 16u;
 
     /*
-     * If the current process is DEAD (called SYS_EXIT), don't re-enqueue.
-     * Just pick the next process.
+     * If the current process is DEAD (SYS_EXIT) or SLEEPING (blocking
+     * syscall), don't re-enqueue it.  Sleeping processes go to the
+     * sleeping_queue; they will be re-queued by sched_wake_waiters().
      */
     if (current_proc->state == PROC_DEAD) {
         next = dequeue_min();
@@ -320,6 +409,26 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
             }
             log_error("[sched] all processes dead – halting");
             __asm__ volatile("cli; hlt");
+            return 0;
+        }
+        goto do_switch;
+    }
+
+    if (current_proc->state == PROC_SLEEPING) {
+        /* Move off the run queue into the sleeping list. */
+        push_sleeping(current_proc);
+        next = dequeue_min();
+        if (!next) {
+            /* Nothing runnable yet – sleep in kernel context.
+             * We'll be woken by an IRQ that calls sched_wake_waiters. */
+            current_proc = (process_t *)0;
+            if (kernel_wait_esp) {
+                unsigned int ret_esp = kernel_wait_esp;
+                kernel_wait_esp = 0;
+                paging_switch_directory(paging_get_kernel_directory());
+                return ret_esp;
+            }
+            /* No kernel thread either – idle until woken. */
             return 0;
         }
         goto do_switch;

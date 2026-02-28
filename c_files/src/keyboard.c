@@ -134,6 +134,8 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         process_t *cur = sched_current();
         if (cur && cur->state != PROC_DEAD) {
             cur->killed = 1;
+            /* Wake it if it is sleeping so it can see the flag. */
+            sched_wake_process(cur);
         }
         return;  /* do not push to the char buffer */
     }
@@ -157,6 +159,8 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
     }
 
     buffer_push(ascii);
+    /* Wake any process sleeping in sys_read / sys_gui_wait. */
+    sched_wake_waiters(WAIT_KEY);
 }
 
 static unsigned char keyboard_read_scancode(void)

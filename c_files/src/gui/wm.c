@@ -16,6 +16,7 @@
 #include "string.h"
 #include "log.h"
 #include "process.h"
+#include "sched.h"
 
 /* -------------------------------------------------------------------------
  * Internal state
@@ -324,6 +325,7 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
                     process_t *p = process_find((unsigned int)owner);
                     if (p && p->state != PROC_DEAD) {
                         p->killed = 1;  /* process exits cleanly via syscall loop */
+                        sched_wake_process(p); /* unblock it if it is sleeping */
                     }
                 }
                 prev_lbtn = lbtn;

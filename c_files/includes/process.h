@@ -56,6 +56,12 @@ typedef enum proc_state {
     PROC_DEAD     = 3    /**< Exited; slot may be reclaimed           */
 } proc_state_t;
 
+/** Reason a process is in PROC_SLEEPING state. */
+typedef enum wait_reason {
+    WAIT_NONE = 0,   /**< Not sleeping / unspecified             */
+    WAIT_KEY  = 1    /**< Sleeping until a keyboard char arrives */
+} wait_reason_t;
+
 /* -------------------------------------------------------------------------
  * Process descriptor
  *
@@ -73,6 +79,7 @@ typedef struct process {
 
     /* --- State ------------------------------------------------------------ */
     proc_state_t    state;        /**< Current state of this process          */
+    wait_reason_t   wait_reason;  /**< Why the process is sleeping (WAIT_*)   */
 
     /* --- Kernel stack and saved context ----------------------------------- */
     unsigned char  *kstack;       /**< Base (lowest address) of kernel stack  */
