@@ -229,7 +229,7 @@ static void gt_render_grid(gui_term_state_t *gt)
                 for (int dy = 0; dy < FONT_H && py + dy < ch; dy++) {
                     unsigned char bits = (unsigned char)font8x8_basic[idx][dy];
                     for (int dx = 0; dx < FONT_W && px + dx < cw; dx++) {
-                        if (bits & (0x80u >> dx))
+                        if (bits & (1u << dx))
                             fb_put_pixel(base_x + px + dx, base_y + py + dy, fg);
                     }
                 }
@@ -257,15 +257,13 @@ static void gt_put_char(char c)
 {
     if (!s_gt) return;
     gt_emit(s_gt, c, GT_FG, GT_BG);
-    gt_render_grid(s_gt);
-    s_gt->win->dirty = 1;
+    s_gt->win->dirty = 1;   /* compositor renders next frame */
 }
 
 static void gt_put_char_color(char c, unsigned char vga_fg)
 {
     if (!s_gt) return;
     gt_emit(s_gt, c, color_from_vga(vga_fg & 0x0F), GT_BG);
-    gt_render_grid(s_gt);
     s_gt->win->dirty = 1;
 }
 
@@ -273,7 +271,6 @@ static void gt_put_string(const char *s)
 {
     if (!s_gt || !s) return;
     while (*s) gt_emit(s_gt, *s++, GT_FG, GT_BG);
-    gt_render_grid(s_gt);
     s_gt->win->dirty = 1;
 }
 
@@ -282,7 +279,6 @@ static void gt_put_string_color(const char *s, unsigned char vga_fg)
     color_t fg = color_from_vga(vga_fg & 0x0F);
     if (!s_gt || !s) return;
     while (*s) gt_emit(s_gt, *s++, fg, GT_BG);
-    gt_render_grid(s_gt);
     s_gt->win->dirty = 1;
 }
 
@@ -342,8 +338,7 @@ static void gt_clear(void)
             *cell_bg  (s_gt, col, row) = GT_BG;
         }
     s_gt->cur_col = s_gt->cur_row = 0;
-    gt_render_grid(s_gt);
-    s_gt->win->dirty = 1;
+    s_gt->win->dirty = 1;   /* compositor renders next frame */
 }
 
 static int gt_tprintf(const char *fmt, ...)

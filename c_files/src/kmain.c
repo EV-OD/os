@@ -164,6 +164,7 @@ void kmain(unsigned int eax, unsigned int ebx)
             wm_window_t *term_win =
                 wm_create(0, 0, sw, sh - TASKBAR_H, "Terminal");
             if (term_win) {
+                term_win->no_drag = 1;   /* full-screen – no titlebar drag */
                 terminal_t *t = gui_term_create(term_win);
                 if (t) {
                     term_set_active(t);

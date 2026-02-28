@@ -23,7 +23,7 @@ static inline void draw_glyph_row(int x, int y, unsigned char row_bits,
     int col;
     for (col = 0; col < FONT_W; col++) {
         /* Bit 7-col is the pixel at column col (0=left). */
-        if (row_bits & (0x80u >> col)) {
+        if (row_bits & (1u << col)) {
             fb_put_pixel(x + col, y, fg);
         } else if (bg != COLOR_TRANSPARENT) {
             fb_put_pixel(x + col, y, bg);

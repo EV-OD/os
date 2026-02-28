@@ -138,13 +138,19 @@ static void mouse_process_packet(unsigned char *p)
         return;
     }
 
-    /* X sign bit in byte 0 bit 4 */
-    dx = (int)(signed char)p[1];
-    if (p[0] & 0x10) dx = (int)(signed char)((int)p[1] | 0xFFFFFF00);
+    /* Discard overflow packets (bits 6 & 7 of byte 0). */
+    if (p[0] & 0xC0) return;
 
-    /* Y sign bit in byte 0 bit 5; PS/2 Y is inverted (positive = up). */
-    dy = -(int)(signed char)p[2];
-    if (p[0] & 0x20) dy = -(int)(signed char)((int)p[2] | 0xFFFFFF00);
+    /* 9-bit signed X delta: sign bit = p[0] bit 4, data = p[1].
+     * If sign bit is set, the 9-bit value is negative: p[1] - 256.     */
+    dx = (int)p[1];
+    if (p[0] & 0x10) dx -= 256;
+
+    /* 9-bit signed Y delta: sign bit = p[0] bit 5, data = p[2].
+     * PS/2 Y axis is positive-up; screen Y is positive-down → negate. */
+    dy = (int)p[2];
+    if (p[0] & 0x20) dy -= 256;
+    dy = -dy;
 
     /* Clamp to screen */
     s_mouse.x       = s_clamp(s_mouse.x + dx, 0, (int)fb_width()  - 1);

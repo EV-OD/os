@@ -19,6 +19,10 @@
 #include "keyboard.h"
 #include "log.h"
 #include "string.h"
+#include "pit.h"   /* pit_get_ticks() – frame rate limiter */
+
+/* Target frame period: 3 ticks × 10 ms = ~33 fps */
+#define FRAME_TICKS  3u
 
 /* -------------------------------------------------------------------------
  * Internal state
@@ -166,42 +170,46 @@ void desktop_init(void)
 void desktop_run(void)
 {
     mouse_state_t prev_ms = mouse_get();
+    unsigned int  last_frame_tick = pit_get_ticks();
 
     for (;;) {
-        mouse_state_t ms = mouse_get();
-        int lbtn     = ms.buttons & 0x01;
-        int prev_lbtn = prev_ms.buttons & 0x01;
+        unsigned int now = pit_get_ticks();
 
-        /* --- Keyboard events --- */
+        /* --- Keyboard events (always polled, not rate-limited) --- */
         if (keyboard_available()) {
             int c = keyboard_read_char();
             if (c > 0)
                 wm_dispatch_key((char)c);
         }
 
-        /* --- Mouse events --- */
-        if (ms.x != prev_ms.x || ms.y != prev_ms.y ||
-            ms.buttons != prev_ms.buttons) {
-            wm_dispatch_mouse(ms.x, ms.y, ms.buttons);
-            /* Desktop icon clicks (left button release) */
-            if (!lbtn && prev_lbtn) {
-                int tb_y = (int)fb_height() - TASKBAR_H;
-                if (ms.y < tb_y)
-                    check_icon_clicks(ms.x, ms.y);
+        /* --- Mouse events (always polled) --- */
+        {
+            mouse_state_t ms = mouse_get();
+            int lbtn      = ms.buttons & 0x01;
+            int prev_lbtn = prev_ms.buttons & 0x01;
+            if (ms.x != prev_ms.x || ms.y != prev_ms.y ||
+                ms.buttons != prev_ms.buttons) {
+                wm_dispatch_mouse(ms.x, ms.y, ms.buttons);
+                if (!lbtn && prev_lbtn) {
+                    int tb_y = (int)fb_height() - TASKBAR_H;
+                    if (ms.y < tb_y)
+                        check_icon_clicks(ms.x, ms.y);
+                }
             }
+            prev_ms = ms;
         }
 
-        /* --- Compose frame ---
-         * Invalidate all windows each frame so on_paint callbacks (e.g.
-         * gui_term's gt_paint) redraw on top of the freshly-drawn wallpaper. */
-        desktop_draw_wallpaper();
-        desktop_draw_icons();
-        wm_invalidate_all();    /* marks every window dirty → on_paint fires */
-        wm_paint_all();
-        desktop_draw_taskbar();
-        mouse_draw_cursor();
-        fb_flush();
+        /* --- Frame render – only at FRAME_TICKS cadence --- */
+        if ((now - last_frame_tick) >= FRAME_TICKS) {
+            last_frame_tick = now;
 
-        prev_ms = ms;
+            desktop_draw_wallpaper();
+            desktop_draw_icons();
+            wm_invalidate_all();   /* marks all windows dirty → on_paint */
+            wm_paint_all();
+            desktop_draw_taskbar();
+            mouse_draw_cursor();
+            fb_flush();
+        }
     }
 }

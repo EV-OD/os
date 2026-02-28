@@ -67,6 +67,7 @@ int gui_launch(multiboot_info_t *mb)
 
     wm_window_t *win = wm_create(0, 0, sw, sh - TASKBAR_H, "Terminal");
     if (win) {
+        win->no_drag = 1;   /* full-screen terminal – disable titlebar drag */
         terminal_t *t = gui_term_create(win);
         if (t) {
             term_set_active(t);

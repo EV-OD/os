@@ -71,6 +71,7 @@ struct wm_window {
 
     /* --- Internal (do not touch) --------------------------------------- */
     int _stack_idx;         /**< Position in wm_stack[]; managed by the WM.      */
+    int no_drag;            /**< Non-zero: disables title-bar drag for this win.  */
 };
 
 /* -------------------------------------------------------------------------

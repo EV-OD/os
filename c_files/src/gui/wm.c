@@ -321,7 +321,7 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
             }
 
             /* Title bar drag? */
-            if (hit_titlebar(hit, mx, my)) {
+            if (hit_titlebar(hit, mx, my) && !hit->no_drag) {
                 drag_win   = hit;
                 drag_off_x = mx - hit->x;
                 drag_off_y = my - hit->y;
