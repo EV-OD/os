@@ -86,7 +86,7 @@
 
 /* Sensitivity: multiply raw PS/2 deltas by this factor.
  * 1 = very slow (1 pixel per tick), 2 = comfortable, 3 = fast. */
-#define MOUSE_SENSITIVITY   2
+#define MOUSE_SENSITIVITY   1
 
 /* =========================================================================
  * Driver state
@@ -300,6 +300,12 @@ static void mouse_irq_handler(struct cpu_state   *cpu,
 void mouse_init(void)
 {
     unsigned char cfg;
+
+    /* ── 0. Silence IRQ12 at the PIC immediately ─────────────────────────
+     * The PIC may have IRQ12 unmasked from reset.  Every ACK byte sent by
+     * the mouse during init will assert IRQ12; masking it now prevents
+     * "Unhandled interrupt: 44" spam before our handler is registered.  */
+    pic_set_mask(MOUSE_IRQ_LINE);
 
     /* ── 1. Disable both ports – no interference during init ─────────── */
     ctl_cmd(PS2_CTL_DISABLE_KBD);
