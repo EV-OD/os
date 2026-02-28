@@ -1,16 +1,32 @@
 /* =========================================================================
- * gui/mouse.c – PS/2 mouse driver (IRQ12, 3-byte packet protocol)
+ * gui/mouse.c – PS/2 mouse driver (IRQ12, standard 3-byte packet protocol)
  *
- * Initialization sequence:
- *   1. Disable keyboard to stabilise the 8042 controller.
- *   2. Enable the PS/2 aux port.
- *   3. Set Compaq status byte bit 1 (enable mouse IRQ12).
- *   4. Send Reset, Set-Defaults, Enable-Reporting to the mouse.
- *   5. Re-enable keyboard.
- *   6. Register IRQ12 handler (vector 44), unmask IRQ12.
+ * ── PS/2 Architecture ────────────────────────────────────────────────────
+ * The Intel 8042 PS/2 controller manages both the keyboard (port 1) and
+ * the auxiliary (mouse) channel (port 2) on a single shared data port 0x60.
+ * The status register (port 0x64) contains two key flags:
  *
- * The IRQ12 handler accumulates 3-byte packets and converts delta
- * movements to absolute screen coordinates.
+ *   Bit 0 (OBF)   – Output Buffer Full: data is waiting at port 0x60.
+ *   Bit 5 (AUXB)  – If set, the byte in the output buffer is from the
+ *                   mouse (aux port), NOT from the keyboard.
+ *
+ * ── Interrupt Sequence ───────────────────────────────────────────────────
+ * IRQ12 fires whenever the 8042 places a mouse byte in the output buffer.
+ * We MUST check AUXB before reading, otherwise keyboard scan codes will
+ * be consumed here instead of by the keyboard driver, causing both drivers
+ * to receive corrupt data.
+ *
+ * ── Packet Format (3 bytes) ──────────────────────────────────────────────
+ * Byte 0:  7      6      5      4      3      2      1      0
+ *          YOVF   XOVF  YSIGN  XSIGN  ALWAY1  MID    RIGHT  LEFT
+ * Byte 1:  X movement delta (lower 8 bits; sign in byte0 bit 4)
+ * Byte 2:  Y movement delta (lower 8 bits; sign in byte0 bit 5)
+ *          PS/2 Y is positive-up; screen Y is positive-down → negate.
+ *
+ * ── Initialisation Order ─────────────────────────────────────────────────
+ * Register the IRQ LAST – after the init ACK / self-test bytes have been
+ * explicitly drained.  Reversed order causes those bytes to corrupt the
+ * packet accumulator and the cursor jumps to a corner and freezes.
  * ========================================================================= */
 
 #include "gui/mouse.h"
@@ -19,58 +35,72 @@
 #include "gui/color.h"
 #include "isr.h"
 #include "pic.h"
-#include "stdio.h"     /* outb / inb */
+#include "stdio.h"   /* outb / inb */
 #include "log.h"
 
-/* -------------------------------------------------------------------------
- * 8042 / PS/2 port constants
- * ------------------------------------------------------------------------- */
+/* =========================================================================
+ * 8042 / PS/2 constants
+ * ========================================================================= */
 
-#define PS2_DATA_PORT   0x60
-#define PS2_CMD_PORT    0x64   /* write = command, read = status */
-#define PS2_STATUS_OBF  0x01   /* output buffer full (data ready to read)  */
-#define PS2_STATUS_IBF  0x02   /* input buffer full  (busy, don't write)   */
+#define PS2_DATA            0x60
+#define PS2_STATUS          0x64   /* read  */
+#define PS2_CMD             0x64   /* write */
 
-/* Commands sent to the controller (port 0x64) */
-#define PS2_CMD_READ_COMPAQ  0x20  /* read  Compaq status byte */
-#define PS2_CMD_WRITE_COMPAQ 0x60  /* write Compaq status byte */
-#define PS2_CMD_AUX_DISABLE  0xA7  /* disable PS/2 mouse port  */
-#define PS2_CMD_AUX_ENABLE   0xA8  /* enable  PS/2 mouse port  */
-#define PS2_CMD_WRITE_AUX    0xD4  /* next byte → mouse         */
-#define PS2_CMD_KBD_DISABLE  0xAD
-#define PS2_CMD_KBD_ENABLE   0xAE
+/* Status register bits */
+#define PS2_SR_OBF          0x01   /* Output buffer full – byte ready at 0x60 */
+#define PS2_SR_IBF          0x02   /* Input  buffer full – controller busy     */
+#define PS2_SR_AUXB         0x20   /* 1 = OBF byte came from mouse (aux port)  */
 
-/* Commands sent to the mouse (via 0xD4 + data port) */
-#define MOUSE_CMD_RESET      0xFF
-#define MOUSE_CMD_DEFAULTS   0xF6
-#define MOUSE_CMD_DATA_ON    0xF4
+/* Controller commands */
+#define PS2_CTL_READ_CFG    0x20
+#define PS2_CTL_WRITE_CFG   0x60
+#define PS2_CTL_DISABLE_AUX 0xA7
+#define PS2_CTL_ENABLE_AUX  0xA8
+#define PS2_CTL_DISABLE_KBD 0xAD
+#define PS2_CTL_ENABLE_KBD  0xAE
+#define PS2_CTL_WRITE_AUX   0xD4   /* Route next byte to mouse */
 
-/* IRQ12 = PIC2 offset (0x28) + 4 = vector 44 */
-#define MOUSE_IRQ_VECTOR     44
-#define MOUSE_IRQ_LINE       12
+/* Configuration byte bits */
+#define PS2_CFG_IRQ12       0x02   /* Enable mouse IRQ12   */
+#define PS2_CFG_AUX_CLOCK   0x20   /* 0 = mouse clock ON   */
 
-/* -------------------------------------------------------------------------
- * State
- * ------------------------------------------------------------------------- */
+/* Mouse device commands */
+#define MS_RESET            0xFF
+#define MS_SET_DEFAULTS     0xF6
+#define MS_ENABLE           0xF4
+#define MS_ACK              0xFA
+#define MS_SELF_TEST_OK     0xAA
 
-static mouse_state_t s_mouse;
-static int           s_mouse_ready = 0;
+/* IRQ */
+#define MOUSE_IRQ_LINE      12
+#define MOUSE_IRQ_VECTOR    44     /* PIC2 base 0x28 + line 4 = 44 */
 
-/* Interrupt packet accumulation */
-static unsigned char s_packet[3];
-static int           s_packet_byte = 0;
+/* Packet byte-0 flags */
+#define PKT_ALWAYS1         0x08
+#define PKT_XSIGN           0x10
+#define PKT_YSIGN           0x20
+#define PKT_XOVF            0x40
+#define PKT_YOVF            0x80
 
-/* Cursor save-under (pixels behind cursor sprite) */
-#define CURSOR_W  12
-#define CURSOR_H  19
+#define PS2_TIMEOUT         100000u
 
-static unsigned int  s_cursor_saved[CURSOR_W * CURSOR_H];
-static int           s_cursor_drawn  = 0;
-static int           s_cursor_save_x = 0;
-static int           s_cursor_save_y = 0;
+/* =========================================================================
+ * Driver state
+ * ========================================================================= */
 
-/* Cursor sprite: 1=fg, 0=bg, 2=transparent */
-static const unsigned char s_cursor_sprite[CURSOR_H][CURSOR_W] = {
+static mouse_state_t s_mouse  = {0, 0, 0};
+static int           s_ready  = 0;
+
+/* 3-byte packet accumulator */
+static unsigned char s_pkt[3];
+static int           s_pkt_idx = 0;
+
+/* ── Cursor sprite (12 × 19) ────────────────────────────────────────────
+ * 0 = black outline, 1 = white fill, 2 = transparent                   */
+#define CUR_W  12
+#define CUR_H  19
+
+static const unsigned char CURSOR[CUR_H][CUR_W] = {
     {1,2,2,2,2,2,2,2,2,2,2,2},
     {1,1,2,2,2,2,2,2,2,2,2,2},
     {1,0,1,2,2,2,2,2,2,2,2,2},
@@ -92,209 +122,293 @@ static const unsigned char s_cursor_sprite[CURSOR_H][CURSOR_W] = {
     {2,2,2,2,2,2,2,2,2,2,1,2},
 };
 
-/* -------------------------------------------------------------------------
- * Low-level 8042 helpers
- * ------------------------------------------------------------------------- */
+#define CURSOR_FG   COLOR_WHITE
+#define CURSOR_OUT  COLOR_RGB(0x00, 0x00, 0x00)
 
+/* Save-under buffer */
+static unsigned int s_saved[CUR_W * CUR_H];
+static int          s_drawn  = 0;
+static int          s_prev_x = 0;
+static int          s_prev_y = 0;
+
+/* =========================================================================
+ * Low-level 8042 helpers
+ * ========================================================================= */
+
+/** Block until the input buffer is empty (safe to write command/data). */
 static void ps2_wait_write(void)
 {
-    unsigned int timeout = 100000;
-    while (timeout-- && (inb(PS2_CMD_PORT) & PS2_STATUS_IBF)) {}
+    unsigned int t = PS2_TIMEOUT;
+    while (t-- && (inb(PS2_STATUS) & PS2_SR_IBF)) {}
 }
 
+/** Block until the output buffer has a byte ready to read. */
 static void ps2_wait_read(void)
 {
-    unsigned int timeout = 100000;
-    while (timeout-- && !(inb(PS2_CMD_PORT) & PS2_STATUS_OBF)) {}
+    unsigned int t = PS2_TIMEOUT;
+    while (t-- && !(inb(PS2_STATUS) & PS2_SR_OBF)) {}
 }
 
-static void mouse_write(unsigned char byte)
+/**
+ * Drain every byte currently in the 8042 output buffer and discard them.
+ * Called before and after mouse init to prevent ACK / self-test bytes from
+ * leaking into the packet accumulator once the IRQ handler is installed.
+ */
+static void ps2_flush(void)
+{
+    unsigned int t = 32;
+    while (t-- && (inb(PS2_STATUS) & PS2_SR_OBF))
+        (void)inb(PS2_DATA);
+}
+
+/** Issue a command to the PS/2 controller. */
+static void ctl_cmd(unsigned char cmd)
 {
     ps2_wait_write();
-    outb(PS2_CMD_PORT, PS2_CMD_WRITE_AUX);
-    ps2_wait_write();
-    outb(PS2_DATA_PORT, byte);
+    outb(PS2_CMD, cmd);
 }
 
-static unsigned char mouse_read(void)
+/**
+ * Send a byte to the mouse via the PS2_CTL_WRITE_AUX tunnel.
+ * Every byte sent to the mouse arrives as an ACK (0xFA) or error reply
+ * in the output buffer; the caller must read those with ps2_flush() or
+ * explicit ps2_wait_read() + inb() calls.
+ */
+static void mouse_send(unsigned char byte)
 {
-    ps2_wait_read();
-    return inb(PS2_DATA_PORT);
+    ctl_cmd(PS2_CTL_WRITE_AUX);
+    ps2_wait_write();
+    outb(PS2_DATA, byte);
 }
 
-/* -------------------------------------------------------------------------
+/**
+ * Send a command to the mouse and poll for the ACK byte (0xFA).
+ * Returns 1 on success, 0 if ACK is not received.
+ */
+static int mouse_cmd_ack(unsigned char cmd)
+{
+    unsigned int t;
+    mouse_send(cmd);
+    for (t = 0; t < 1000u; t++) {
+        ps2_wait_read();
+        if (inb(PS2_DATA) == MS_ACK) return 1;
+    }
+    return 0;
+}
+
+/* =========================================================================
  * Packet processing
- * ------------------------------------------------------------------------- */
+ * ========================================================================= */
 
-static int s_clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+static int s_clamp(int v, int lo, int hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
 
-static void mouse_process_packet(unsigned char *p)
+/**
+ * Decode a complete 3-byte PS/2 mouse packet and update the mouse state.
+ *
+ * 9-bit signed X/Y:
+ *   The data byte holds the low 8 bits; the sign bit is in byte 0.
+ *   Negative values: data - 256  (equivalent to sign-extending bit 8).
+ *   Example: if XSIGN=1 and p[1]=0xFE → dx = 0xFE - 256 = -2.
+ */
+static void process_packet(unsigned char *p)
 {
     int dx, dy;
 
-    /* Bit 3 should always be 1; if not, packet sync is lost. */
-    if (!(p[0] & 0x08)) {
-        s_packet_byte = 0;
+    /* Bit 3 must always be 1 – if zero we are de-synced; drop & resync. */
+    if (!(p[0] & PKT_ALWAYS1)) {
+        s_pkt_idx = 0;
         return;
     }
 
-    /* Discard overflow packets (bits 6 & 7 of byte 0). */
-    if (p[0] & 0xC0) return;
+    /* Overflow means the delta is unreliable – discard the packet. */
+    if (p[0] & (PKT_XOVF | PKT_YOVF))
+        return;
 
-    /* 9-bit signed X delta: sign bit = p[0] bit 4, data = p[1].
-     * If sign bit is set, the 9-bit value is negative: p[1] - 256.     */
-    dx = (int)p[1];
-    if (p[0] & 0x10) dx -= 256;
+    dx = (int)(unsigned int)p[1];
+    if (p[0] & PKT_XSIGN) dx -= 256;
 
-    /* 9-bit signed Y delta: sign bit = p[0] bit 5, data = p[2].
-     * PS/2 Y axis is positive-up; screen Y is positive-down → negate. */
-    dy = (int)p[2];
-    if (p[0] & 0x20) dy -= 256;
-    dy = -dy;
+    dy = (int)(unsigned int)p[2];
+    if (p[0] & PKT_YSIGN) dy -= 256;
+    dy = -dy;   /* PS/2 Y positive = up; screen Y positive = down */
 
-    /* Clamp to screen */
     s_mouse.x       = s_clamp(s_mouse.x + dx, 0, (int)fb_width()  - 1);
     s_mouse.y       = s_clamp(s_mouse.y + dy, 0, (int)fb_height() - 1);
-    s_mouse.buttons = p[0] & 0x07;
+    s_mouse.buttons = (unsigned char)(p[0] & 0x07);
 }
 
-/* -------------------------------------------------------------------------
- * IRQ12 handler
- * ------------------------------------------------------------------------- */
+/* =========================================================================
+ * IRQ 12 handler
+ * ========================================================================= */
 
-static void mouse_irq_handler(struct cpu_state *cpu,
+/**
+ * Called on every IRQ12.
+ *
+ * Critical checks before consuming the byte:
+ *   1. OBF  must be set – data is actually present in the buffer.
+ *   2. AUXB must be set – the byte came from the mouse, not the keyboard.
+ *
+ * If AUXB is clear the byte is keyboard data and belongs to the keyboard
+ * driver's IRQ1 handler; we must NOT read it here.
+ *
+ * For the first byte of a new packet (s_pkt_idx == 0) we additionally
+ * verify that PKT_ALWAYS1 is set.  If it is not, the byte is not a valid
+ * packet start (could be a stale ACK or a stream mis-alignment) and we
+ * discard it, effectively waiting for a clean packet boundary.
+ */
+static void mouse_irq_handler(struct cpu_state   *cpu,
                                struct stack_state *stack,
-                               unsigned int interrupt)
+                               unsigned int        interrupt)
 {
+    unsigned char status;
+    unsigned char byte;
+
     (void)cpu; (void)stack; (void)interrupt;
 
-    s_packet[s_packet_byte++] = inb(PS2_DATA_PORT);
-    if (s_packet_byte == 3) {
-        s_packet_byte = 0;
-        mouse_process_packet(s_packet);
+    status = inb(PS2_STATUS);
+
+    if (!(status & PS2_SR_OBF))   return;  /* nothing to read        */
+    if (!(status & PS2_SR_AUXB))  return;  /* not from mouse         */
+
+    byte = inb(PS2_DATA);
+
+    /* At packet position 0, enforce the ALWAYS1 synchronisation bit. */
+    if (s_pkt_idx == 0 && !(byte & PKT_ALWAYS1))
+        return;  /* discard and wait for a real first byte */
+
+    s_pkt[s_pkt_idx++] = byte;
+
+    if (s_pkt_idx == 3) {
+        s_pkt_idx = 0;
+        process_packet(s_pkt);
     }
 }
 
-/* -------------------------------------------------------------------------
+/* =========================================================================
  * mouse_init
- * ------------------------------------------------------------------------- */
+ * ========================================================================= */
 
 void mouse_init(void)
 {
-    unsigned char status;
+    unsigned char cfg;
 
-    /* 1. Register IRQ12 handler and unmask BEFORE enabling aux IRQ to
-     *    prevent "Unhandled interrupt: 44" if the mouse fires early. */
+    /* ── 1. Disable both ports – no interference during init ─────────── */
+    ctl_cmd(PS2_CTL_DISABLE_KBD);
+    ctl_cmd(PS2_CTL_DISABLE_AUX);
+
+    /* ── 2. Flush stale bytes from the output buffer ─────────────────── */
+    ps2_flush();
+
+    /* ── 3. Configure the controller ─────────────────────────────────── */
+    ctl_cmd(PS2_CTL_READ_CFG);
+    ps2_wait_read();
+    cfg = inb(PS2_DATA);
+
+    cfg |=  PS2_CFG_IRQ12;     /* Enable mouse IRQ12                       */
+    cfg &= ~PS2_CFG_AUX_CLOCK; /* Clear bit 5: enable mouse clock          */
+
+    ctl_cmd(PS2_CTL_WRITE_CFG);
+    ps2_wait_write();
+    outb(PS2_DATA, cfg);
+
+    /* ── 4. Enable the auxiliary (mouse) port ────────────────────────── */
+    ctl_cmd(PS2_CTL_ENABLE_AUX);
+
+    /* ── 5. Reset the mouse and read back the self-test response ─────── */
+    mouse_send(MS_RESET);
+    ps2_wait_read(); (void)inb(PS2_DATA);  /* 0xFA ACK         */
+    ps2_wait_read(); (void)inb(PS2_DATA);  /* 0xAA self-test   */
+    ps2_wait_read(); (void)inb(PS2_DATA);  /* 0x00 device ID   */
+
+    /* ── 6. Restore defaults ─────────────────────────────────────────── */
+    if (!mouse_cmd_ack(MS_SET_DEFAULTS))
+        log_warning("[mouse] Set Defaults NAK");
+
+    /* ── 7. Enable data reporting ────────────────────────────────────── */
+    if (!mouse_cmd_ack(MS_ENABLE))
+        log_warning("[mouse] Enable Reporting NAK");
+
+    /* ── 8. Drain ALL ACK / self-test residue before installing handler ─
+     *
+     * This is the most important flush.  Without it the ACK bytes from
+     * steps 5-7 are the FIRST bytes seen by mouse_irq_handler, causing
+     * the packet accumulator to start at the wrong position.  This makes
+     * the cursor jump to a screen corner and ignore all real movement.  */
+    ps2_flush();
+
+    /* ── 9. Re-enable keyboard ───────────────────────────────────────── */
+    ctl_cmd(PS2_CTL_ENABLE_KBD);
+
+    /* ── 10. Install IRQ12 handler (LAST – after all init traffic) ────── */
     register_interrupt_handler(MOUSE_IRQ_VECTOR, mouse_irq_handler);
     pic_clear_mask(MOUSE_IRQ_LINE);
 
-    /* 2. Disable PS/2 keyboard temporarily */
-    ps2_wait_write();
-    outb(PS2_CMD_PORT, PS2_CMD_KBD_DISABLE);
-
-    /* 3. Enable PS/2 auxiliary (mouse) port */
-    ps2_wait_write();
-    outb(PS2_CMD_PORT, PS2_CMD_AUX_ENABLE);
-
-    /* 4. Enable mouse interrupts via Compaq Status Byte bit 1 */
-    ps2_wait_write();
-    outb(PS2_CMD_PORT, PS2_CMD_READ_COMPAQ);
-    ps2_wait_read();
-    status = inb(PS2_DATA_PORT);
-    status |= 0x02;   /* enable aux IRQ */
-    status &= ~0x20;  /* clear "mouse disabled" bit */
-    ps2_wait_write();
-    outb(PS2_CMD_PORT, PS2_CMD_WRITE_COMPAQ);
-    ps2_wait_write();
-    outb(PS2_DATA_PORT, status);
-
-    /* 5. Reset mouse; read 0xAA (self-test pass) + 0x00 (device ID) */
-    mouse_write(MOUSE_CMD_RESET);
-    mouse_read(); /* 0xFA ack */
-    mouse_read(); /* 0xAA self-test */
-    mouse_read(); /* 0x00 device ID */
-
-    /* 6. Set defaults */
-    mouse_write(MOUSE_CMD_DEFAULTS);
-    mouse_read(); /* 0xFA ack */
-
-    /* 7. Enable data reporting */
-    mouse_write(MOUSE_CMD_DATA_ON);
-    mouse_read(); /* 0xFA ack */
-
-    /* 8. Re-enable keyboard */
-    ps2_wait_write();
-    outb(PS2_CMD_PORT, PS2_CMD_KBD_ENABLE);
-
-    /* Centre cursor on screen */
-    s_mouse.x = (int)(fb_width()  / 2);
-    s_mouse.y = (int)(fb_height() / 2);
+    /* Cursor starts at screen centre */
+    s_mouse.x       = (int)(fb_width()  / 2);
+    s_mouse.y       = (int)(fb_height() / 2);
     s_mouse.buttons = 0;
+    s_pkt_idx       = 0;
+    s_ready         = 1;
 
-    s_mouse_ready = 1;
-    log_info("[mouse] PS/2 mouse initialised (IRQ12)");
+    log_info("[mouse] PS/2 mouse ready – IRQ12 active, cursor at (%d,%d)",
+             s_mouse.x, s_mouse.y);
 }
 
-/* -------------------------------------------------------------------------
- * mouse_get
- * ------------------------------------------------------------------------- */
+/* =========================================================================
+ * Public accessors
+ * ========================================================================= */
 
-mouse_state_t mouse_get(void)
-{
-    return s_mouse;
-}
+mouse_state_t mouse_get(void)       { return s_mouse; }
+int           mouse_available(void) { return s_ready;  }
 
-int mouse_available(void)
-{
-    return s_mouse_ready;
-}
-
-/* -------------------------------------------------------------------------
+/* =========================================================================
  * mouse_draw_cursor
  *
- * 1. Restore the pixels saved from the previous frame.
- * 2. Save the pixels behind the new cursor position.
- * 3. Draw the arrow sprite.
- * ------------------------------------------------------------------------- */
+ * Draws a hardware-style software cursor using a save-under technique:
+ *   1. Restore pixels that were behind the cursor last frame.
+ *   2. Save pixels behind the cursor's new position.
+ *   3. Stamp the arrow sprite.
+ *
+ * Must be called once per frame AFTER wm_paint_all() so the cursor
+ * is always composited on top of every window.
+ * ========================================================================= */
 
 void mouse_draw_cursor(void)
 {
-    int mx, my, row, col;
-    unsigned char kind;
-    color_t px;
+    int row, col;
 
-    if (!s_mouse_ready || !fb_available()) return;
+    if (!s_ready || !fb_available()) return;
 
-    mx = s_mouse.x;
-    my = s_mouse.y;
-
-    /* Restore previous under-cursor pixels */
-    if (s_cursor_drawn) {
-        for (row = 0; row < CURSOR_H; row++)
-            for (col = 0; col < CURSOR_W; col++)
-                fb_put_pixel(s_cursor_save_x + col,
-                             s_cursor_save_y + row,
-                             s_cursor_saved[row * CURSOR_W + col]);
+    /* Restore previous save-under */
+    if (s_drawn) {
+        for (row = 0; row < CUR_H; row++)
+            for (col = 0; col < CUR_W; col++)
+                fb_put_pixel(s_prev_x + col,
+                             s_prev_y + row,
+                             s_saved[row * CUR_W + col]);
     }
 
-    /* Save pixels behind new cursor position */
-    for (row = 0; row < CURSOR_H; row++)
-        for (col = 0; col < CURSOR_W; col++)
-            s_cursor_saved[row * CURSOR_W + col] =
-                fb_get_pixel(mx + col, my + row);
+    /* Save what is currently behind the cursor */
+    for (row = 0; row < CUR_H; row++)
+        for (col = 0; col < CUR_W; col++)
+            s_saved[row * CUR_W + col] =
+                fb_get_pixel(s_mouse.x + col, s_mouse.y + row);
 
-    s_cursor_save_x = mx;
-    s_cursor_save_y = my;
+    s_prev_x = s_mouse.x;
+    s_prev_y = s_mouse.y;
 
-    /* Draw sprite */
-    for (row = 0; row < CURSOR_H; row++) {
-        for (col = 0; col < CURSOR_W; col++) {
-            kind = s_cursor_sprite[row][col];
-            if (kind == 2) continue;   /* transparent */
-            px = (kind == 1) ? COLOR_CURSOR_FG : COLOR_CURSOR_BORDER;
-            fb_put_pixel(mx + col, my + row, px);
+    /* Stamp arrow sprite */
+    for (row = 0; row < CUR_H; row++) {
+        for (col = 0; col < CUR_W; col++) {
+            unsigned char k = CURSOR[row][col];
+            if (k == 2) continue;
+            fb_put_pixel(s_mouse.x + col,
+                         s_mouse.y + row,
+                         k == 1 ? CURSOR_FG : CURSOR_OUT);
         }
     }
 
-    s_cursor_drawn = 1;
+    s_drawn = 1;
 }
