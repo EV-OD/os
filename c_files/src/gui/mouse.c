@@ -84,6 +84,10 @@
 
 #define PS2_TIMEOUT         100000u
 
+/* Sensitivity: multiply raw PS/2 deltas by this factor.
+ * 1 = very slow (1 pixel per tick), 2 = comfortable, 3 = fast. */
+#define MOUSE_SENSITIVITY   2
+
 /* =========================================================================
  * Driver state
  * ========================================================================= */
@@ -233,6 +237,9 @@ static void process_packet(unsigned char *p)
     dy = (int)(unsigned int)p[2];
     if (p[0] & PKT_YSIGN) dy -= 256;
     dy = -dy;   /* PS/2 Y positive = up; screen Y positive = down */
+
+    dx *= MOUSE_SENSITIVITY;
+    dy *= MOUSE_SENSITIVITY;
 
     s_mouse.x       = s_clamp(s_mouse.x + dx, 0, (int)fb_width()  - 1);
     s_mouse.y       = s_clamp(s_mouse.y + dy, 0, (int)fb_height() - 1);
