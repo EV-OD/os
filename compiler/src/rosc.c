@@ -129,6 +129,7 @@ int rosc_compile(const char *src_path, const char *out_path)
 
     /* --- Stage 3: Code generation -------------------------------------- */
     codegen_init(&g_codegen);
+    codegen_prescan(&g_codegen, prog);
 
     if (codegen_run(&g_codegen, prog) != 0 || g_codegen.had_error) {
         puts_color("[FAIL] ", COLOR_LIGHT_RED);
@@ -143,7 +144,7 @@ int rosc_compile(const char *src_path, const char *out_path)
     memset(&hdr, 0, sizeof(hdr));
     hdr.magic        = ROX_MAGIC;
     hdr.version      = ROX_VERSION;
-    hdr.entry_offset = 0;                 /* entry = start of code section  */
+    hdr.entry_offset = (unsigned int)g_codegen.entry_offset;
     hdr.code_size    = (unsigned int)g_codegen.binary_len;
     hdr.flags        = 0;
     strncpy(hdr.name, prog_name, 11);
@@ -175,8 +176,8 @@ int rosc_compile(const char *src_path, const char *out_path)
         puts_color(buf, COLOR_LIGHT_GREEN);
     }
 
-    /* Show binding results at compile time */
-    codegen_dump_bindings(&g_codegen);
+    /* dump code / stats if requested */
+    // codegen_dump_code(&g_codegen);
 
     log_info("[rosc] wrote %s (%d + %d bytes)",
              output_path, (int)sizeof(hdr), g_codegen.binary_len);
@@ -256,6 +257,7 @@ void rosc_run(void)
 
     section("Code generation");
     codegen_init(&g_codegen);
+    codegen_prescan(&g_codegen, prog);
 
     if (codegen_run(&g_codegen, prog) != 0 || g_codegen.had_error) {
         puts("[FAIL] Codegen errors -- aborting compilation.\n");
@@ -263,7 +265,7 @@ void rosc_run(void)
     }
     codegen_dump_code(&g_codegen);
     puts("\n");
-    codegen_dump_bindings(&g_codegen);
+    
 
     puts("\n[OK] Phase 1 compilation complete.\n");
 }

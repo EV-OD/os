@@ -25,13 +25,28 @@ typedef signed int      i32;
 typedef int bool;
 
 /* -----------------------------------------------------------------------
- * Compiler limits – all allocation is static (no heap in Phase 1).
+ * Compiler limits  (Phase 2+ – full language)
  * --------------------------------------------------------------------- */
-#define MAX_TOKENS      512   /* max tokens per source unit              */
-#define MAX_AST_NODES   256   /* max AST nodes per source unit           */
-#define MAX_CODE_BYTES  4096  /* max bytes in the generated flat binary  */
-#define MAX_BINDINGS    64    /* max let-bindings per program            */
-#define MAX_IDENT_LEN   32    /* max identifier / type-name length       */
-#define MAX_SRC_LEN     4096  /* max source string length                */
+#define MAX_TOKENS        2048   /* max tokens per source unit                  */
+#define MAX_AST_NODES     1024   /* max AST nodes per source unit               */
+#define MAX_CODE_BYTES    65536  /* max bytes in the generated flat binary       */
+#define MAX_DATA_BYTES    32768  /* max bytes for embedded string / data section */
+#define MAX_BINDINGS      256    /* max variables / bindings per scope           */
+#define MAX_IDENT_LEN     48     /* max identifier / type-name length            */
+#define MAX_SRC_LEN       32768  /* max source string length                     */
+#define MAX_FUNCTIONS     64     /* max user-defined function definitions        */
+#define MAX_PARAMS        8      /* max parameters per function                  */
+#define MAX_LOCALS        64     /* max local variables per function             */
+#define MAX_STRINGS       128    /* max distinct string literals per program     */
+#define MAX_STR_LEN       256    /* max characters in one string literal         */
+#define MAX_FIXUPS        512    /* max jump-fixup entries                       */
+#define MAX_BREAK_STACK   16     /* max nesting depth of break-able loops        */
+#define MAX_STMTS         256    /* max statements in one block                  */
+#define MAX_ARGS          8      /* max arguments in a function call             */
+
+/* -----------------------------------------------------------------------
+ * Helper macros
+ * --------------------------------------------------------------------- */
+#define ARRAY_SIZE(a)  (sizeof(a) / sizeof((a)[0]))
 
 #endif /* COMPILER_COMMON_H */

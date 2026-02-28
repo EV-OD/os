@@ -45,8 +45,8 @@
  * tables are required for the initial implementation.  The heap starts
  * at 0xC0300000 and extends to 0xC0400000 (1 MB of initial heap space).
  * ------------------------------------------------------------------------- */
-#define KHEAP_VSTART  0xC0300000u   /* virtual start of heap                  */
-#define KHEAP_VEND    0xC0800000u   /* virtual end  of heap (5 MB – fits 3 MB FB back-buffer) */
+#define KHEAP_VSTART  0xC0500000u   /* virtual start of heap (above kernel BSS ~0xC03F8D40)  */
+#define KHEAP_VEND    0xC1500000u   /* virtual end  of heap (16 MB available)                  */
 #define KHEAP_SIZE    (KHEAP_VEND - KHEAP_VSTART)
 
 /* -------------------------------------------------------------------------

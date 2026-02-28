@@ -891,6 +891,122 @@ static const char sample_fib[] =
     "print(f9)\n"
     "print(f10)\n";
 
+static const char sample_loops[] =
+    "// Loops and conditionals demo\n"
+    "//\n"
+    "// Compile:  rosc loops.ros\n"
+    "// Run:      ./loops.rox\n"
+    "\n"
+    "fn main() {\n"
+    "    print(\"=== Loops Demo ===\\n\")\n"
+    "\n"
+    "    // Count 1 to 5 with while\n"
+    "    print(\"Counting up:\\n\")\n"
+    "    let mut i: i32 = 1\n"
+    "    while i <= 5 {\n"
+    "        print(i)\n"
+    "        i = i + 1\n"
+    "    }\n"
+    "\n"
+    "    // Countdown with while\n"
+    "    print(\"Counting down:\\n\")\n"
+    "    let mut n: i32 = 5\n"
+    "    while n > 0 {\n"
+    "        print(n)\n"
+    "        n = n - 1\n"
+    "    }\n"
+    "\n"
+    "    // if / else\n"
+    "    print(\"Even/odd check:\\n\")\n"
+    "    let mut k: i32 = 0\n"
+    "    while k < 6 {\n"
+    "        if k % 2 == 0 {\n"
+    "            print(\"even\\n\")\n"
+    "        } else {\n"
+    "            print(\"odd\\n\")\n"
+    "        }\n"
+    "        k = k + 1\n"
+    "    }\n"
+    "}\n";
+
+static const char sample_funcs[] =
+    "// Functions demo\n"
+    "//\n"
+    "// Compile:  rosc funcs.ros\n"
+    "// Run:      ./funcs.rox\n"
+    "\n"
+    "fn add(a: i32, b: i32) -> i32 {\n"
+    "    return a + b\n"
+    "}\n"
+    "\n"
+    "fn factorial(n: i32) -> i32 {\n"
+    "    if n <= 1 {\n"
+    "        return 1\n"
+    "    }\n"
+    "    return n * factorial(n - 1)\n"
+    "}\n"
+    "\n"
+    "fn max(a: i32, b: i32) -> i32 {\n"
+    "    if a > b {\n"
+    "        return a\n"
+    "    }\n"
+    "    return b\n"
+    "}\n"
+    "\n"
+    "fn main() {\n"
+    "    print(\"=== Functions Demo ===\\n\")\n"
+    "\n"
+    "    let s: i32 = add(12, 30)\n"
+    "    print(\"12 + 30 = \")\n"
+    "    print(s)\n"
+    "\n"
+    "    print(\"5! = \")\n"
+    "    print(factorial(5))\n"
+    "\n"
+    "    print(\"max(18, 42) = \")\n"
+    "    print(max(18, 42))\n"
+    "}\n";
+
+static const char sample_gui[] =
+    "// GUI window demo\n"
+    "//\n"
+    "// Opens a window, draws shapes and text, waits for 'q' to quit.\n"
+    "//\n"
+    "// Compile:  rosc gui.ros\n"
+    "// Run:      ./gui.rox\n"
+    "\n"
+    "fn main() {\n"
+    "    // Open a 320x200 window at position 80,60\n"
+    "    let win: i32 = gui_window(80, 60, 320, 200, \"RandomOS GUI\")\n"
+    "\n"
+    "    // Dark-blue background\n"
+    "    gui_fill(win, 0x001030)\n"
+    "\n"
+    "    // White border rectangle\n"
+    "    gui_rect(win, 10, 10, 300, 160)\n"
+    "\n"
+    "    // Title text\n"
+    "    gui_text(win, 20, 20, \"Hello from RandomOS!\", 0xFFFFFF)\n"
+    "    gui_text(win, 20, 40, \"Press Q to quit.\",    0xCCCCCC)\n"
+    "\n"
+    "    // A green circle\n"
+    "    gui_circle(win, 160, 110, 40, 0x00FF44)\n"
+    "\n"
+    "    // A red filled rectangle\n"
+    "    gui_rect(win, 40, 80, 80, 40)\n"
+    "\n"
+    "    // Push canvas to screen\n"
+    "    gui_flush(win)\n"
+    "\n"
+    "    // Event loop: exit on 'q' (ASCII 113)\n"
+    "    let mut key: i32 = 0\n"
+    "    while key != 113 {\n"
+    "        key = gui_wait(win)\n"
+    "    }\n"
+    "\n"
+    "    gui_close(win)\n"
+    "}\n";
+
 struct sample_entry {
     const char *name;
     const char *file;
@@ -899,10 +1015,13 @@ struct sample_entry {
 };
 
 static const struct sample_entry sample_table[] = {
-    { "hello",   "hello.ros",   sample_hello,   "Hello + variables"    },
-    { "strings", "strings.ros", sample_strings, "String printing"      },
-    { "math",    "math.ros",    sample_math,    "Math operations"      },
-    { "fib",     "fib.ros",     sample_fib,     "Fibonacci sequence"   },
+    { "hello",   "hello.ros",   sample_hello,   "Hello + variables"       },
+    { "strings", "strings.ros", sample_strings, "String printing"         },
+    { "math",    "math.ros",    sample_math,    "Math operations"         },
+    { "fib",     "fib.ros",     sample_fib,     "Fibonacci sequence"      },
+    { "loops",   "loops.ros",   sample_loops,   "While loops + if/else"   },
+    { "funcs",   "funcs.ros",   sample_funcs,   "Functions + recursion"   },
+    { "gui",     "gui.ros",     sample_gui,     "GUI window + drawing"    },
 };
 
 #define SAMPLE_COUNT (sizeof(sample_table) / sizeof(sample_table[0]))

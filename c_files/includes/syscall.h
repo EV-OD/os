@@ -29,8 +29,20 @@
 #define SYS_GETPID   3   /* int  getpid(void)                               */
 #define SYS_YIELD    4   /* void yield(void)                                */
 #define SYS_SBRK     5   /* void *sbrk(int increment)  (future)            */
+#define SYS_GUI_OPEN   6
+#define SYS_GUI_CLOSE  7
+#define SYS_GUI_FILL   8
+#define SYS_GUI_TEXT   9
+#define SYS_GUI_LINE   10
+#define SYS_GUI_RECT   11
+#define SYS_GUI_CIRCLE 12
+#define SYS_GUI_FLUSH  13
+#define SYS_GUI_POLL   14
+#define SYS_GUI_WAIT   15
 
-#define SYSCALL_MAX  5
+#undef SYSCALL_MAX
+#define SYSCALL_MAX  15
+
 
 /* -------------------------------------------------------------------------
  * Kernel-side dispatcher – called from interrupt_handler when int == 128.

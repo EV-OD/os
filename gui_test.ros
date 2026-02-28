@@ -1,0 +1,14 @@
+fn main() {
+    let win: i32 = gui_window(100, 100, 300, 200, "GUI App");
+    let c: i32 = 0;
+    
+    gui_fill(win, 0xAA0000);
+    gui_rect(win, 50, 50, 200, 100);
+    gui_text(win, 60, 60, "Hello GUI World!", 0xFFFFFF);
+    gui_flush(win);
+
+    while c != 113 {
+        c = gui_wait(win);
+    }
+    gui_close(win);
+}
