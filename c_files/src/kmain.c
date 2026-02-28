@@ -50,6 +50,17 @@ multiboot_info_t *g_multiboot_info = (multiboot_info_t *)0;
 #include "gui/wm.h"
 #include "gui/gui_term.h"
 #include "terminal.h"
+
+/*
+ * Two kernel tasks for GUI mode:
+ *   compositor  (nice=0)  – runs desktop_run() which handles mouse,
+ *                            keyboard dispatch, and repaints every frame.
+ *   shell       (nice=5)  – runs shell_run() which reads from the GUI
+ *                            terminal's key buffer via term_active()->get_char().
+ * The PIT at 10 ms preempts between them via the CFS scheduler.
+ */
+static void gui_compositor_task(void) { desktop_run(); }
+static void gui_shell_task(void)      { shell_run();   }
 #endif
 
 /* -------------------------------------------------------------------------
@@ -159,11 +170,25 @@ void kmain(unsigned int eax, unsigned int ebx)
                 }
             }
             desktop_init();
-            /* desktop_run() calls the event loop; shell reads from
-             * the active GUI terminal via term_active()->get_char(). */
-            log_info("[kmain] entering GUI mode");
-            shell_run();   /* shell uses term_active() which is the GUI term */
-            /* Unreachable */
+
+            /*
+             * Launch two preemptive kernel tasks under the CFS scheduler:
+             *   compositor – desktop_run() handles mouse, keyboard dispatch,
+             *                and repaints the screen every frame.
+             *   shell      – shell_run() reads from the GUI terminal key
+             *                buffer via term_active()->get_char().
+             * sched_start() never returns; the PIT at 10 ms drives switching.
+             */
+            {
+                process_t *comp  = process_create("compositor",
+                                                  gui_compositor_task, 0);
+                process_t *shell = process_create("shell",
+                                                  gui_shell_task, 5);
+                if (comp)  sched_add(comp);
+                if (shell) sched_add(shell);
+            }
+            log_info("[kmain] entering GUI mode (CFS scheduler)");
+            sched_start();   /* NEVER RETURNS */
         } else {
             log_info("[kmain] GUI unavailable – entering nerd mode shell");
             shell_run();

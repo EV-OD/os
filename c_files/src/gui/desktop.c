@@ -191,9 +191,12 @@ void desktop_run(void)
             }
         }
 
-        /* --- Compose frame --- */
+        /* --- Compose frame ---
+         * Invalidate all windows each frame so on_paint callbacks (e.g.
+         * gui_term's gt_paint) redraw on top of the freshly-drawn wallpaper. */
         desktop_draw_wallpaper();
         desktop_draw_icons();
+        wm_invalidate_all();    /* marks every window dirty → on_paint fires */
         wm_paint_all();
         desktop_draw_taskbar();
         mouse_draw_cursor();

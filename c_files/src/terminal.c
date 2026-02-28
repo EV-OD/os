@@ -39,12 +39,14 @@ void term_set_active(terminal_t *t)
 
 static void vga_put_char(char c)
 {
-    putchar(c);
+    /* Use putchar_raw to avoid re-entering putchar() when term_active()
+     * points to the VGA terminal (would cause infinite recursion). */
+    putchar_raw(c);
 }
 
 static void vga_put_char_color(char c, unsigned char fg)
 {
-    putchar_color(c, fg);
+    putchar_color_raw(c, fg);
 }
 
 static void vga_put_string(const char *s)

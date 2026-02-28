@@ -127,13 +127,14 @@ int puts_at(char *buf)
     return 0;
 }
 
-int putchar(char c)
+/* Raw VGA write – bypasses term_active() delegation.
+ * Used by the VGA terminal vtable to avoid infinite recursion. */
+void putchar_raw(char c)
 {
     if (c == '\n') {
         cursor_move_newline();
         fb_check_scroll();
     } else if (c == '\t') {
-        /* Advance to next 8-column tab stop */
         unsigned short col = (cursor_pos / 2) % FB_COLUMNS;
         unsigned short next_tab = (col + 8) & ~7u;
         if (next_tab > FB_COLUMNS) next_tab = FB_COLUMNS;
@@ -144,7 +145,6 @@ int putchar(char c)
         }
         fb_check_scroll();
     } else if (c == '\r') {
-        /* Carriage return – move to start of current row */
         unsigned short row = (cursor_pos / 2) / FB_COLUMNS;
         cursor_pos = row * FB_COLUMNS * 2;
         fb_move_cursor(cursor_pos / 2);
@@ -153,6 +153,20 @@ int putchar(char c)
         cursor_move_forward();
         fb_check_scroll();
     }
+}
+
+int putchar(char c)
+{
+#ifdef GUI_MODE
+    {
+        terminal_t *t = term_active();
+        if (t && t->put_char) {
+            t->put_char(c);
+            return 0;
+        }
+    }
+#endif
+    putchar_raw(c);
     return 0;
 }
 
@@ -429,7 +443,9 @@ int printf(const char *fmt, ...)
  * putchar_color – write a single character with a specified foreground color.
  * Background is always black. Handles '\n'. Scrolls as needed.
  * ========================================================================= */
-void putchar_color(char c, unsigned char fg)
+
+/* Raw VGA color write – no delegation. */
+void putchar_color_raw(char c, unsigned char fg)
 {
     if (c == '\n') {
         cursor_move_newline();
@@ -453,6 +469,20 @@ void putchar_color(char c, unsigned char fg)
         cursor_move_forward();
         fb_check_scroll();
     }
+}
+
+void putchar_color(char c, unsigned char fg)
+{
+#ifdef GUI_MODE
+    {
+        terminal_t *t = term_active();
+        if (t && t->put_char_color) {
+            t->put_char_color(c, fg);
+            return;
+        }
+    }
+#endif
+    putchar_color_raw(c, fg);
 }
 
 /* =========================================================================

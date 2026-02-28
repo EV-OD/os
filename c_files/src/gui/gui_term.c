@@ -67,6 +67,28 @@ static int  gt_tprintf(const char *fmt, ...);
 static gui_term_state_t *s_gt = (void *)0;
 
 /* -------------------------------------------------------------------------
+ * Key ring buffer – filled by gt_on_key (called from wm_dispatch_key),
+ * drained by gt_get_char (called from shell_run / readline).
+ * With a preemptive scheduler the compositor task reads the keyboard and
+ * dispatches keys here; the shell task blocks on this buffer.
+ * ------------------------------------------------------------------------- */
+#define GT_KEY_BUF 128
+static volatile char         s_key_buf[GT_KEY_BUF];
+static volatile unsigned int s_key_head = 0;
+static volatile unsigned int s_key_tail = 0;
+
+static void gt_on_key(wm_window_t *win, char c)
+{
+    unsigned int next;
+    (void)win;
+    next = (s_key_tail + 1u) % GT_KEY_BUF;
+    if (next != s_key_head) {   /* drop if full */
+        s_key_buf[s_key_tail] = c;
+        s_key_tail = next;
+    }
+}
+
+/* -------------------------------------------------------------------------
  * Grid helpers
  * ------------------------------------------------------------------------- */
 
@@ -265,20 +287,21 @@ static void gt_put_string_color(const char *s, unsigned char vga_fg)
 }
 
 /**
- * Blocking get_char that drives the compositor while waiting.
- * This is the heart of the cooperative single-threaded GUI.
+ * Blocking get_char – reads from the key buffer that is filled by the
+ * compositor task via wm_dispatch_key → gt_on_key.
+ * Just spins; the PIT-driven scheduler preempts into the compositor task
+ * which pumps the keyboard ring buffer into this buffer.
  */
 static int gt_get_char(void)
 {
-    int c;
-    while ((c = keyboard_read_char()) == -1) {
-        /* Keep the screen alive while the shell is blocked */
-        wm_paint_all();
-        desktop_draw_taskbar();
-        mouse_draw_cursor();
-        fb_flush();
+    while (s_key_head == s_key_tail) {
+        /* yield to compositor task – scheduler will context-switch */
     }
-    return c;
+    {
+        char c = s_key_buf[s_key_head];
+        s_key_head = (s_key_head + 1u) % GT_KEY_BUF;
+        return (int)(unsigned char)c;
+    }
 }
 
 static int gt_read_line(char *buf, unsigned int max)
@@ -393,8 +416,9 @@ terminal_t *gui_term_create(wm_window_t *win)
     gt->term.clear           = gt_clear;
     gt->term.tprintf         = gt_tprintf;
 
-    /* Set WM paint callback */
+    /* Set WM callbacks */
     win->on_paint = gt_paint;
+    win->on_key   = gt_on_key;
 
     /* Register as active global state */
     s_gt = gt;

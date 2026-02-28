@@ -115,6 +115,8 @@ int putchar_at(char c, unsigned short pos);
 int puts_at(char *buf);
 int putchar(char c);
 int puts(char *buf);
+void putchar_raw(char c);           /* raw VGA write, no term_active delegation */
+void putchar_color_raw(char c, unsigned char fg); /* raw VGA color write */
 int write(char *buf, unsigned int len);
 
 /**
