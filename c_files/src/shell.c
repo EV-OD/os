@@ -21,6 +21,7 @@
 #include "string.h"
 #include "vfs.h"
 #include "rox.h"
+#include "rosc.h"
 #include "kheap.h"
 #include "log.h"
 #include "pit.h"
@@ -66,6 +67,8 @@ static int cmd_stat(int argc, char **argv);
 static int cmd_write(int argc, char **argv);
 static int cmd_uname(int argc, char **argv);
 static int cmd_whoami(int argc, char **argv);
+static int cmd_rosc(int argc, char **argv);
+static int cmd_sample(int argc, char **argv);
 
 static const builtin_cmd_t builtins[] = {
     { "help",   "Show available commands",          cmd_help   },
@@ -83,6 +86,8 @@ static const builtin_cmd_t builtins[] = {
     { "write",  "Write text to a file",             cmd_write  },
     { "uname",  "Print system information",         cmd_uname  },
     { "whoami", "Print current user",               cmd_whoami },
+    { "rosc",   "Compile .ros source to .rox",      cmd_rosc   },
+    { "sample", "Create sample .ros source file",   cmd_sample },
     { (void *)0, (void *)0, (void *)0 } /* sentinel */
 };
 
@@ -157,31 +162,90 @@ static int tokenise(char *input, char **argv, int max_args)
  * 3. Otherwise, search the built-in table
  * 4. If neither, print "command not found"
  * ========================================================================= */
+/* =========================================================================
+ * Helper: check if a string ends with a given suffix
+ * ========================================================================= */
+static int ends_with(const char *str, const char *suffix)
+{
+    int slen = strlen(str);
+    int xlen = strlen(suffix);
+    if (xlen > slen) return 0;
+    return strcmp(str + slen - xlen, suffix) == 0;
+}
+
+/* =========================================================================
+ * Command resolver
+ *
+ * Resolution order:
+ *   1. If cmd starts with "./" or "/" → treat as literal .rox path
+ *   2. If cmd ends with ".rox" → resolve relative to cwd
+ *   3. Try /bin/<cmd>.rox
+ *   4. Search built-in command table
+ *   5. "command not found"
+ * ========================================================================= */
 static int resolve_and_execute(int argc, char **argv)
 {
     if (argc == 0) return 0;
 
     const char *cmd = argv[0];
+    vfs_stat_t st;
 
-    /* --- Step 1: Try /bin/<cmd>.rox ------------------------------------ */
+    /* --- Step 1: Explicit path (starts with / or ./) ------------------- */
+    if (cmd[0] == '/') {
+        /* Absolute path – run directly */
+        if (vfs_stat(cmd, &st) == 0 && !(st.attributes & 0x10)) {
+            return rox_load_and_run(cmd, argc, argv);
+        }
+        puts_color("rosh: ", COLOR_LIGHT_RED);
+        puts((char *)cmd);
+        puts(": no such file\n");
+        return -1;
+    }
+
+    if (cmd[0] == '.' && cmd[1] == '/') {
+        /* Relative path from cwd */
+        char rox_path[256];
+        resolve_path(cmd + 2, rox_path, sizeof(rox_path));
+        if (vfs_stat(rox_path, &st) == 0 && !(st.attributes & 0x10)) {
+            return rox_load_and_run(rox_path, argc, argv);
+        }
+        puts_color("rosh: ", COLOR_LIGHT_RED);
+        puts((char *)cmd);
+        puts(": no such file\n");
+        return -1;
+    }
+
+    /* --- Step 2: If cmd ends with .rox, resolve relative to cwd -------- */
+    if (ends_with(cmd, ".rox")) {
+        char rox_path[256];
+        resolve_path(cmd, rox_path, sizeof(rox_path));
+        if (vfs_stat(rox_path, &st) == 0 && !(st.attributes & 0x10)) {
+            return rox_load_and_run(rox_path, argc, argv);
+        }
+        puts_color("rosh: ", COLOR_LIGHT_RED);
+        puts(rox_path);
+        puts(": no such file\n");
+        return -1;
+    }
+
+    /* --- Step 3: Try /bin/<cmd>.rox ------------------------------------ */
     {
         char rox_path[128];
         sprintf(rox_path, "/bin/%s.rox", cmd);
 
-        vfs_stat_t st;
         if (vfs_stat(rox_path, &st) == 0 && !(st.attributes & 0x10)) {
             return rox_load_and_run(rox_path, argc, argv);
         }
     }
 
-    /* --- Step 2: Built-in command table -------------------------------- */
+    /* --- Step 4: Built-in command table -------------------------------- */
     for (int i = 0; builtins[i].name != (void *)0; i++) {
         if (strcmp(cmd, builtins[i].name) == 0) {
             return builtins[i].handler(argc, argv);
         }
     }
 
-    /* --- Step 3: Not found --------------------------------------------- */
+    /* --- Step 5: Not found --------------------------------------------- */
     puts_color("rosh: ", COLOR_LIGHT_RED);
     puts((char *)cmd);
     puts(": command not found\n");
@@ -679,5 +743,78 @@ static int cmd_whoami(int argc, char **argv)
 {
     (void)argc; (void)argv;
     puts("rabin\n");
+    return 0;
+}
+
+/* --- rosc -------------------------------------------------------------- */
+static int cmd_rosc(int argc, char **argv)
+{
+    if (argc < 2) {
+        puts("Usage: rosc <input.ros> [output.rox]\n");
+        puts("  Compile a .ros source file into a .rox executable.\n");
+        return -1;
+    }
+
+    char src_path[256];
+    resolve_path(argv[1], src_path, sizeof(src_path));
+
+    const char *out = (argc >= 3) ? argv[2] : (const char *)0;
+    char out_path[256];
+
+    if (out) {
+        resolve_path(out, out_path, sizeof(out_path));
+        return rosc_compile(src_path, out_path);
+    }
+
+    return rosc_compile(src_path, (const char *)0);
+}
+
+/* --- sample ------------------------------------------------------------ */
+static int cmd_sample(int argc, char **argv)
+{
+    const char *filename = "hello.ros";
+    if (argc >= 2) filename = argv[1];
+
+    char path[256];
+    resolve_path(filename, path, sizeof(path));
+
+    /* Check if file already exists */
+    vfs_stat_t st;
+    if (vfs_stat(path, &st) == 0) {
+        puts_color("sample: file already exists: ", COLOR_LIGHT_BROWN);
+        puts(path);
+        putchar('\n');
+        return -1;
+    }
+
+    int fd = vfs_open(path, VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd < 0) {
+        puts_color("sample: cannot create: ", COLOR_LIGHT_RED);
+        puts(path);
+        putchar('\n');
+        return -1;
+    }
+
+    static const char sample_src[] =
+        "// Hello from RandomOS!\n"
+        "// This is a sample .ros program.\n"
+        "//\n"
+        "// Compile with:  rosc hello.ros\n"
+        "// Run with:      ./hello.rox\n"
+        "\n"
+        "let x: i32 = 42\n"
+        "let y: i32 = x * 2 + 8\n"
+        "let answer: i32 = (x + y) / 2\n";
+
+    vfs_write(fd, sample_src, strlen(sample_src));
+    vfs_close(fd);
+
+    puts_color("  created: ", COLOR_LIGHT_GREEN);
+    puts(path);
+    putchar('\n');
+    puts_color("  compile: ", COLOR_DARK_GREY);
+    puts("rosc ");
+    puts(path);
+    putchar('\n');
     return 0;
 }

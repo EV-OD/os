@@ -2,12 +2,10 @@
  * rox.c – Rabin OS eXecutable loader
  *
  * Loads .rox files from the VFS, validates the header, copies the code
- * into a kernel buffer, and calls the entry point.
+ * into a buffer, and spawns a user-mode process to execute it.
  *
- * Phase 1: Executables run as kernel-mode function calls (ring 0).
- *          The entry point signature is: void entry(int argc, char **argv)
- *
- * Phase 2 (future): Load into a separate address space and iret to ring 3.
+ * The loader creates a ring-3 process via process_create_user(), adds it
+ * to the CFS scheduler, and waits for it to complete via process_wait().
  * ========================================================================= */
 
 #include "rox.h"
@@ -15,6 +13,8 @@
 #include "kheap.h"
 #include "log.h"
 #include "string.h"
+#include "process.h"
+#include "sched.h"
 
 /* -------------------------------------------------------------------------
  * rox_validate_header
@@ -33,10 +33,13 @@ int rox_validate_header(const rox_header_t *hdr)
 }
 
 /* -------------------------------------------------------------------------
- * rox_load_and_run
+ * rox_load_and_run – load a .rox and execute it as a user-mode process.
  * ------------------------------------------------------------------------- */
 int rox_load_and_run(const char *path, int argc, char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     log_info("[rox] loading %s", path);
 
     /* Open the file */
@@ -91,18 +94,35 @@ int rox_load_and_run(const char *path, int argc, char **argv)
         return -2;
     }
 
-    /* Calculate entry point */
-    void (*entry)(int, char **) =
-        (void (*)(int, char **))(code + hdr.entry_offset);
+    /* --- Spawn a user-mode process ------------------------------------ */
+    process_t *proc = process_create_user(
+        hdr.name,          /* process name      */
+        code,              /* code buffer       */
+        hdr.code_size,     /* code size         */
+        hdr.entry_offset,  /* entry offset      */
+        0                  /* nice = 0          */
+    );
 
-    log_info("[rox] executing at 0x%x", (unsigned int)entry);
-
-    /* Call the program */
-    entry(argc, argv);
-
-    /* Free the code buffer after return */
+    /* Free the code buffer – process_create_user copies it into user pages */
     kfree(code);
 
-    log_info("[rox] %s exited", hdr.name);
-    return 0;
+    if (!proc) {
+        log_error("[rox] failed to create user process for %s", path);
+        return -4;
+    }
+
+    /* Add to scheduler and wait for completion */
+    sched_add(proc);
+
+    log_info("[rox] spawned '%s' as pid=%d, waiting...", hdr.name, (int)proc->pid);
+
+    int exit_status = process_wait(proc->pid);
+
+    log_info("[rox] '%s' (pid=%d) exited with status %d",
+             hdr.name, (int)proc->pid, exit_status);
+
+    /* Clean up the dead process */
+    process_destroy(proc);
+
+    return exit_status;
 }

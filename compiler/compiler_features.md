@@ -1,7 +1,7 @@
 # RandomOS Language — Compiler Features
 
 > Design document for the native compiler that ships with RandomOS.
-> The compiler runs **on the host** (Linux x86) and produces flat **32-bit x86 machine code** binaries that execute directly inside RandomOS (ring 3 / user mode).
+> The compiler runs **inside the OS** (as a shell built-in) and produces **.rox executables** containing flat **32-bit x86 machine code** that execute in **ring 3 (user mode)**.
 
 ---
 
@@ -21,30 +21,34 @@ Source (.ros)
 └──────────┘
     │
     ▼
-┌───────────────┐
-│ Semantic Pass │  → Type-checked / annotated AST
-└───────────────┘
-    │
-    ▼
 ┌──────────┐
-│ IR Gen   │  → Flat intermediate representation (three-address code)
+│ Code Gen │  → Flat x86-32 machine code + embedded string data
 └──────────┘
     │
     ▼
 ┌──────────┐
-│ Optimizer│  → Optimised IR (constant folding, dead-code elimination)
+│.rox Write│  → ROX header (32 B) + code + data section
 └──────────┘
     │
     ▼
-┌──────────┐
-│ Code Gen │  → Raw x86-32 machine code (flat binary)
-└──────────┘
-    │
-    ▼
-  program.bin   (loadable by RandomOS)
+  program.rox   (loadable & runnable by rosh)
 ```
 
 Each stage is a **separate module** (source file) so it can be tested and evolved independently.
+
+### Phase 1 (Current Implementation)
+
+The Phase 1 compiler supports integer arithmetic with `let` bindings.  All expressions
+are **constant-folded at compile time**.  The generated binary uses `int 0x80` syscalls
+to print each binding's result and then exits cleanly.
+
+**Shell workflow:**
+```
+$ sample hello.ros          # create a sample .ros source file
+$ cat hello.ros             # view the source
+$ rosc hello.ros            # compile → hello.rox
+$ ./hello.rox               # run in user mode (ring 3)
+```
 
 ---
 
@@ -54,68 +58,108 @@ Each stage is a **separate module** (source file) so it can be tested and evolve
 |---|---|
 | Architecture | x86 (IA-32), 32-bit protected mode |
 | Privilege level | Ring 3 (user mode) |
-| Output format | Flat binary (no ELF headers for now; later: simple RandomOS executable format) |
-| System calls | Via `int 0x80` (or a dedicated software interrupt chosen by RandomOS) |
-| Memory model | Flat, single segment, all pointers 32-bit |
+| Output format | .rox executable (32-byte header + flat code + data) |
+| System calls | Via `int 0x80` (ABI: EAX=nr, EBX-EDI=args, return in EAX) |
+| Memory model | Flat, single segment, code at 0x08048000, stack at 0xBFFFF000 |
 | Calling convention | cdecl (caller cleans stack, EAX for return value) |
+| Process lifecycle | `rox_load_and_run()` → `process_create_user()` → `sched_add()` → `process_wait()` → `process_destroy()` |
+
+### .rox Executable Format
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0x00 | 4 | magic | `0x524F5821` ("ROX!" ASCII) |
+| 0x04 | 4 | version | Format version (currently 1) |
+| 0x08 | 4 | entry_offset | Entry point offset from start of code section |
+| 0x0C | 4 | code_size | Size of code+data section in bytes |
+| 0x10 | 4 | flags | Reserved (0) |
+| 0x14 | 12 | name | Null-terminated program name |
+| 0x20 | ... | code+data | Flat binary: instructions followed by string data |
 
 ---
 
 ## 3. Type System
 
-### 3.1 Primitive Types
+### 3.1 Primitive Types (Phase 1: i32, u32, bool)
+
+| Type | Size | Description |
+|---|---|---|
+| `i32` | 4 bytes | Signed 32-bit integer (default integer type) |
+| `u32` | 4 bytes | Unsigned 32-bit integer |
+| `bool` | 1 byte | `true` / `false` |
+
+### 3.2 Future Types (Phase 2+)
 
 | Type | Size | Description |
 |---|---|---|
 | `i8` | 1 byte | Signed 8-bit integer (also used for characters) |
 | `i16` | 2 bytes | Signed 16-bit integer |
-| `i32` | 4 bytes | Signed 32-bit integer (default integer type) |
 | `u8` | 1 byte | Unsigned 8-bit integer / byte |
 | `u16` | 2 bytes | Unsigned 16-bit integer |
-| `u32` | 4 bytes | Unsigned 32-bit integer |
-| `bool` | 1 byte | `true` / `false` |
 | `void` | 0 | No value (for functions only) |
-
-### 3.2 Compound Types
-
-| Type | Example | Notes |
-|---|---|---|
-| Arrays | `i32[10]` | Fixed-size, stack or global |
-| Pointers | `*u8` | Raw pointer — dereferenced with `@` operator |
-| Structs | `struct Packet { ... }` | Value types, passed by copy unless pointer |
-| Strings | `str` | Pointer + length pair, **not** null-terminated internally |
+| Arrays | e.g. `i32[10]` | Fixed-size, stack or global |
+| Pointers | e.g. `*u8` | Raw pointer |
+| Structs | e.g. `struct Packet {}` | Value types |
+| Strings | `str` | Pointer + length pair |
 
 ### 3.3 Type Rules
 
 - **Statically typed** — every variable has a type known at compile time.
-- **Type inference** on `let` bindings: `let x = 42` infers `i32`.
+- Phase 1: explicit type annotation required (`let x: i32 = ...`).
+- Future: type inference on `let` bindings (`let x = 42` infers `i32`).
 - **Explicit casts** required between different-width integers (`x as u8`).
-- No implicit pointer ↔ integer conversion (must use `as`).
 
 ---
 
-## 4. Hardware Access (User-Level)
+## 4. Syscall Interface
 
-One of the language's key goals is giving the programmer **controlled access to x86 hardware** without kernel privileges.
+The compiler generates direct `int 0x80` instructions.  The ABI matches the kernel's
+syscall dispatcher:
 
-### 4.1 Port I/O (via syscalls)
+| Register | Purpose |
+|----------|---------|
+| EAX | Syscall number |
+| EBX | Argument 1 |
+| ECX | Argument 2 |
+| EDX | Argument 3 |
+| ESI | Argument 4 |
+| EDI | Argument 5 |
+| EAX (return) | Return value |
+
+### Current Syscalls
+
+| Number | Name | Signature |
+|--------|------|-----------|
+| 0 | `SYS_EXIT` | `void _exit(int status)` |
+| 1 | `SYS_WRITE` | `int write(int fd, const char *buf, int len)` |
+| 2 | `SYS_READ` | `int read(int fd, char *buf, int len)` |
+| 3 | `SYS_GETPID` | `int getpid(void)` |
+| 4 | `SYS_YIELD` | `void yield(void)` |
+| 5 | `SYS_SBRK` | `void *sbrk(int increment)` (future) |
+
+### Phase 1 Code Generation
+
+For each `let` binding, the codegen:
+1. Constant-folds the expression at compile time
+2. Builds an embedded string `"name = value\n"`
+3. Emits: `mov eax, 1; mov ebx, 1; mov ecx, <str_addr>; mov edx, <len>; int 0x80`
+
+After all bindings, emits: `mov eax, 0; mov ebx, 0; int 0x80; hlt`
+
+String addresses are absolute (base = `0x08048000 + code_length`).
+
+---
+
+## 5. Hardware Access (Planned)
+
+### 5.1 Port I/O (via syscalls)
 
 ```
-// Exposed as built-in functions that compile to syscall wrappers.
-// The kernel validates the port range before executing.
-
 port_out(port: u16, value: u8)      // outb
-port_out16(port: u16, value: u16)   // outw
 let b: u8  = port_in(port: u16)    // inb
-let w: u16 = port_in16(port: u16)  // inw
 ```
 
-> The kernel will maintain an I/O permission bitmap (IOPB) so only approved ports are reachable from ring 3.
-> For Phase 1, these simply emit `int 0x80` with the appropriate syscall number.
-
-### 4.2 Inline Assembly
-
-For anything the type system cannot express:
+### 5.2 Inline Assembly
 
 ```
 asm {
@@ -124,100 +168,80 @@ asm {
 }
 ```
 
-- Inline `asm` blocks are **pass-through**: the compiler copies the assembly text into the code-gen stage verbatim and assembles it.
-- An extended form lets you bind variables:
+### 5.3 Memory-Mapped I/O
 
 ```
-let result: u32
-asm (result <- eax) {
-    mov eax, 0x0F
-    cpuid
-}
+let fb = 0x000B8000 as *u8
+@(fb + 0) = 0x41
 ```
-
-### 4.3 Memory-Mapped I/O
-
-```
-let fb = 0x000B8000 as *u8      // VGA framebuffer address
-@(fb + 0) = 0x41                // write 'A' to top-left cell
-@(fb + 1) = 0x0F                // white-on-black attribute
-```
-
-Direct pointer arithmetic + dereference gives full MMIO control.
 
 ---
 
-## 5. Syscall Interface
+## 6. Error Reporting
 
-The compiler provides **built-in wrappers** for every RandomOS system call. Internally each wrapper:
-
-1. Places the syscall number in `eax`.
-2. Places arguments in `ebx`, `ecx`, `edx`, `esi`, `edi` (in order).
-3. Executes `int 0x80`.
-4. Reads the return value from `eax`.
-
-Initial syscall set (mirrors current kernel capabilities):
-
-| Number | Name | Description |
-|---|---|---|
-| 0 | `sys_exit` | Terminate process with exit code |
-| 1 | `sys_write` | Write buffer to framebuffer / serial |
-| 2 | `sys_read` | Blocking read from keyboard |
-| 3 | `sys_port_in` | Read from I/O port (validated) |
-| 4 | `sys_port_out` | Write to I/O port (validated) |
-| 5 | `sys_sleep` | Yield for N timer ticks |
-
----
-
-## 6. Optimisations (Planned)
-
-The compiler will ship with a small set of safe, impactful optimisations:
-
-| Pass | Stage | Description |
-|---|---|---|
-| Constant folding | IR | Evaluate constant expressions at compile time |
-| Dead code elimination | IR | Remove unreachable/unused code |
-| Strength reduction | IR | Replace expensive ops (mul by power-of-2 → shift) |
-| Register allocation | Code Gen | Linear-scan allocator over x86 GP registers |
-| Peephole | Code Gen | Combine redundant `mov`/`push`/`pop` sequences |
-
-All optimisations are optional and can be toggled with `-O0` (none) through `-O2`.
-
----
-
-## 7. Error Reporting
-
-- Every error message includes **file, line, column** and a source snippet with a caret (`^`) pointing to the offending token.
-- Warnings for: unused variables, implicit truncation, unreachable code.
-- Errors are categorised: `[lexer]`, `[parser]`, `[type]`, `[codegen]`.
+- Every error message includes **category, message, line, column**.
+- Errors are categorised: `[lexer]`, `[parser]`, `[codegen]`.
+- The error subsystem tracks a global error count per compilation unit.
 
 Example:
 ```
-error[type]: cannot assign `u32` to `u8` without explicit cast
- --> main.ros:14:9
-   |
-14 |     let b: u8 = big_value
-   |         ^ expected `u8`, found `u32`
-   |
-   = help: use `big_value as u8` to truncate
+error[parser]: expected ':' after variable name  (line 3, col 8)
 ```
 
 ---
 
-## 8. Compiler CLI
+## 7. Compiler CLI (Shell Built-in)
 
 ```
-rosc <input.ros> [options]
+rosc <input.ros> [output.rox]
 
-Options:
-  -o <file>       Output binary path (default: a.bin)
-  -O<level>       Optimisation level: 0, 1, 2 (default: 0)
-  --emit-ir       Dump IR to stdout (for debugging)
-  --emit-asm      Dump generated assembly to stdout
-  --emit-tokens   Dump lexer token stream
-  --emit-ast      Dump parsed AST as indented text
-  -v, --verbose   Verbose compilation log
-  -h, --help      Show help
+  Reads <input.ros> from the VFS, compiles it, and writes a .rox
+  executable.  If output.rox is omitted, replaces .ros with .rox.
+
+sample [filename.ros]
+
+  Creates a sample .ros source file in the current directory.
+  Default filename: hello.ros
+```
+
+---
+
+## 8. Shell Integration
+
+### Command Resolution Order (rosh)
+
+1. Absolute path (`/bin/prog.rox`) → load directly
+2. Relative path (`./prog.rox`) → resolve from cwd
+3. Bare `.rox` name (`prog.rox`) → resolve from cwd
+4. Bare command (`prog`) → try `/bin/prog.rox`
+5. Built-in command table
+6. "command not found"
+
+### Execution Flow
+
+```
+shell input: "./hello.rox"
+    │
+    ▼
+resolve_and_execute()
+    │ resolve path → "/home/hello.rox"
+    ▼
+rox_load_and_run("/home/hello.rox")
+    │ read .rox header, validate, read code
+    ▼
+process_create_user("hello", code, size, 0, nice=0)
+    │ create page directory
+    │ map code at 0x08048000 (4KB pages)
+    │ map stack at 0xBFFFF000
+    │ build ring-3 iret frame on kernel stack
+    ▼
+sched_add(proc)       ← process enters CFS run queue
+    │
+    ▼
+process_wait(pid)     ← shell blocks (sti; hlt) until child exits
+    │
+    ▼
+process_destroy(proc) ← free page dir, kernel stack, frames
 ```
 
 ---
@@ -227,40 +251,42 @@ Options:
 ```
 compiler/
 ├── compiler_features.md      ← this file
-├── language_structure.md     ← language syntax & semantics reference
-├── src/
-│   ├── main.c                ← CLI entry point, argument parsing
-│   ├── lexer.c / lexer.h     ← Tokeniser
-│   ├── parser.c / parser.h   ← Recursive-descent parser → AST
-│   ├── ast.c / ast.h         ← AST node definitions & helpers
-│   ├── sema.c / sema.h       ← Semantic analysis & type checking
-│   ├── ir.c / ir.h           ← IR generation (three-address code)
-│   ├── opt.c / opt.h         ← IR-level optimisations
-│   ├── codegen.c / codegen.h ← x86-32 machine code emitter
-│   ├── elf.c / elf.h         ← (future) simple executable format writer
-│   └── error.c / error.h     ← Diagnostic formatting
 ├── include/
-│   └── common.h              ← Shared typedefs, macros, limits
-├── stdlib/
-│   └── core.ros              ← Minimal standard library (print, read, etc.)
-├── tests/
-│   ├── test_lexer.c
-│   ├── test_parser.c
-│   └── programs/             ← Sample .ros programs for end-to-end testing
-│       ├── hello.ros
-│       └── fibonacci.ros
-└── CMakeLists.txt            ← Build integration
+│   └── common.h              ← shared typedefs, macros, limits
+├── src/
+│   ├── rosc.c                ← compiler driver (rosc_compile + legacy demo)
+│   ├── lexer.c / lexer.h     ← tokeniser
+│   ├── parser.c / parser.h   ← recursive-descent parser → AST
+│   ├── ast.c / ast.h         ← AST node definitions & helpers
+│   ├── codegen.c / codegen.h ← x86-32 machine code emitter (user-mode)
+│   └── error.c / error.h     ← diagnostic formatting
+└── tests/
+    └── programs/             ← sample .ros programs
+
+c_files/
+├── includes/
+│   ├── rosc.h                ← compiler public API (rosc_compile)
+│   ├── rox.h                 ← .rox format & loader API
+│   ├── shell.h               ← shell with rosc + sample commands
+│   ├── process.h             ← process_create_user() for ring-3
+│   └── syscall.h             ← int 0x80 dispatcher
+├── src/
+│   ├── rox.c                 ← .rox loader → process_create_user → wait
+│   ├── shell.c               ← cmd_rosc, cmd_sample, ./path resolution
+│   ├── process.c             ← user-mode process creation
+│   ├── syscall.c             ← syscall handlers (exit, write, read, ...)
+│   └── sched.c               ← CFS scheduler with CR3 switching
 ```
 
 ---
 
 ## 10. Phase Plan
 
-| Phase | Milestone | Key Deliverables |
-|---|---|---|
-| **Phase 1** | Minimal viable compiler | Lexer, parser, code-gen for integer arithmetic. Flat binary output. |
-| **Phase 2** | Control flow & functions | `if`/`else`, `while`, `for`, user functions, call stack. |
-| **Phase 3** | Type system | Structs, arrays, pointers, type checking, `str` type. |
-| **Phase 4** | Hardware access | Inline asm, `port_in`/`port_out` syscalls, MMIO helpers. |
-| **Phase 5** | Optimiser | Constant folding, dead-code elimination, register allocator. |
-| **Phase 6** | Standard library & tooling | `core.ros` stdlib, REPL/shell integration, debugger hooks. |
+| Phase | Milestone | Status | Key Deliverables |
+|---|---|---|---|
+| **Phase 1** | Minimal viable compiler | **Done** | Lexer, parser, codegen for integer arithmetic. `.rox` output. User-mode execution via `int 0x80`. Shell commands `rosc` and `sample`. |
+| **Phase 2** | Control flow & functions | Planned | `if`/`else`, `while`, `for`, user functions, call stack, `print()` built-in. |
+| **Phase 3** | Type system | Planned | Structs, arrays, pointers, type checking, `str` type. |
+| **Phase 4** | Hardware access | Planned | Inline asm, `port_in`/`port_out` syscalls, MMIO helpers. |
+| **Phase 5** | Optimiser | Planned | Constant folding (already done), dead-code elimination, register allocator. |
+| **Phase 6** | Standard library & tooling | Planned | `core.ros` stdlib, REPL/shell integration, debugger hooks. |

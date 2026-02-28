@@ -18,15 +18,89 @@ static void emit8(Codegen *cg, u8 b)
         cg->code[cg->code_len++] = b;
 }
 
-/* Emit  MOV EAX, imm32  (opcode B8 /id, 5 bytes, little-endian). */
-static void emit_mov_eax_imm32(Codegen *cg, i32 val)
+/* Emit a 32-bit little-endian immediate. */
+static void emit32(Codegen *cg, u32 val)
 {
-    u32 v = (u32)val;
+    emit8(cg, (u8)( val        & 0xFF));
+    emit8(cg, (u8)((val >>  8) & 0xFF));
+    emit8(cg, (u8)((val >> 16) & 0xFF));
+    emit8(cg, (u8)((val >> 24) & 0xFF));
+}
+
+/* Emit  MOV EAX, imm32  (opcode B8 + imm32, 5 bytes). */
+static void emit_mov_eax_imm32(Codegen *cg, u32 val)
+{
     emit8(cg, 0xB8);
-    emit8(cg, (u8)( v        & 0xFF));
-    emit8(cg, (u8)((v >>  8) & 0xFF));
-    emit8(cg, (u8)((v >> 16) & 0xFF));
-    emit8(cg, (u8)((v >> 24) & 0xFF));
+    emit32(cg, val);
+}
+
+/* Emit  MOV EBX, imm32  (opcode BB + imm32, 5 bytes). */
+static void emit_mov_ebx_imm32(Codegen *cg, u32 val)
+{
+    emit8(cg, 0xBB);
+    emit32(cg, val);
+}
+
+/* Emit  MOV ECX, imm32  (opcode B9 + imm32, 5 bytes). */
+static void emit_mov_ecx_imm32(Codegen *cg, u32 val)
+{
+    emit8(cg, 0xB9);
+    emit32(cg, val);
+}
+
+/* Emit  MOV EDX, imm32  (opcode BA + imm32, 5 bytes). */
+static void emit_mov_edx_imm32(Codegen *cg, u32 val)
+{
+    emit8(cg, 0xBA);
+    emit32(cg, val);
+}
+
+/* Emit  int 0x80  (2 bytes: CD 80). */
+static void emit_int80(Codegen *cg)
+{
+    emit8(cg, 0xCD);
+    emit8(cg, 0x80);
+}
+
+/* -----------------------------------------------------------------------
+ * Integer-to-string helper (for embedding result strings)
+ *
+ * Converts a signed i32 to a decimal string.  Returns number of chars
+ * written (not including the null terminator).
+ * --------------------------------------------------------------------- */
+static int i32_to_str(i32 val, char *buf, int buf_size)
+{
+    char tmp[16];
+    int  i = 0, len;
+    int  neg = 0;
+    u32  uval;
+
+    if (val < 0) {
+        neg = 1;
+        /* Handle INT_MIN (-2147483648) carefully */
+        uval = (u32)(-(val + 1)) + 1u;
+    } else {
+        uval = (u32)val;
+    }
+
+    /* Generate digits in reverse order */
+    if (uval == 0) {
+        tmp[i++] = '0';
+    } else {
+        while (uval > 0 && i < 15) {
+            tmp[i++] = '0' + (char)(uval % 10);
+            uval /= 10;
+        }
+    }
+    if (neg && i < 15) tmp[i++] = '-';
+
+    /* Reverse into buf */
+    len = 0;
+    while (i > 0 && len < buf_size - 1) {
+        buf[len++] = tmp[--i];
+    }
+    buf[len] = '\0';
+    return len;
 }
 
 /* -----------------------------------------------------------------------
@@ -55,7 +129,6 @@ static int eval_expr(Codegen *cg, AstNode *node, i32 *out)
             }
             /* Not found */
             char msg[64];
-            /* Build without %s to be safe – just concatenate manually */
             strcpy(msg, "undefined variable: ");
             strncpy(msg + 20, node->name, MAX_IDENT_LEN - 1);
             error_report("codegen", msg, 0, 0);
@@ -95,15 +168,47 @@ static int eval_expr(Codegen *cg, AstNode *node, i32 *out)
 }
 
 /* -----------------------------------------------------------------------
+ * Build an embedded string for a binding: "name = value\n"
+ * --------------------------------------------------------------------- */
+static void add_binding_string(Codegen *cg, const char *name, i32 val)
+{
+    if (cg->string_count >= MAX_BINDINGS) return;
+
+    CodegenString *s = &cg->strings[cg->string_count];
+    char vbuf[16];
+    int  vlen = i32_to_str(val, vbuf, sizeof(vbuf));
+    int  nlen = strlen(name);
+    int  pos  = 0;
+
+    /* "name = value\n" */
+    if (nlen > 60) nlen = 60; /* safety */
+    memcpy(s->str + pos, name, nlen); pos += nlen;
+    s->str[pos++] = ' ';
+    s->str[pos++] = '=';
+    s->str[pos++] = ' ';
+    memcpy(s->str + pos, vbuf, vlen); pos += vlen;
+    s->str[pos++] = '\n';
+    s->str[pos]   = '\0';
+    s->len = pos;
+    cg->string_count++;
+}
+
+/* -----------------------------------------------------------------------
  * Main code-generation pass
+ *
+ * 1. Constant-fold all let-bindings, build binding table + strings
+ * 2. Emit user-mode code: for each binding, SYS_WRITE(1, str, len)
+ * 3. Emit SYS_EXIT(0)
+ * 4. Assemble final binary = code + string data
  * --------------------------------------------------------------------- */
 int codegen_run(Codegen *cg, AstNode *prog)
 {
     int    i;
-    i32    last_val = 0;
+    u32    data_start;
 
     if (!prog || prog->type != AST_PROGRAM) return -1;
 
+    /* --- Pass 1: constant-fold all bindings and build strings ----------- */
     for (i = 0; i < prog->stmt_count; i++) {
         AstNode *stmt = prog->stmts[i];
         if (!stmt || stmt->type != AST_LET) continue;
@@ -117,17 +222,76 @@ int codegen_run(Codegen *cg, AstNode *prog)
             cg->bind_val[cg->bind_count] = val;
             cg->bind_count++;
         }
-        last_val = val;
+
+        /* Build embedded string */
+        add_binding_string(cg, stmt->name, val);
     }
 
+    /* --- Pass 2: calculate code size first (for data offsets) ----------- */
     /*
-     * Emit the flat binary for the compiled function:
+     * For each string: 5+5+5+5+2 = 22 bytes of instructions
+     *   mov eax, SYS_WRITE       (5)
+     *   mov ebx, 1               (5)  ; fd = stdout
+     *   mov ecx, <str_addr>      (5)  ; pointer to string
+     *   mov edx, <str_len>       (5)  ; length
+     *   int 0x80                 (2)
      *
-     *   mov  eax, <last_val>   ; return value
-     *   ret
+     * Exit syscall: 5+5+2 = 12 bytes
+     *   mov eax, SYS_EXIT        (5)
+     *   mov ebx, 0               (5)  ; exit status
+     *   int 0x80                 (2)
+     *   (plus 1 byte hlt as safety)
      */
-    emit_mov_eax_imm32(cg, last_val);
-    emit8(cg, 0xC3);   /* RET */
+    int code_size_estimate = cg->string_count * 22 + 13;
+
+    /* Calculate string data base offset from binary start */
+    data_start = USER_CODE_BASE + (u32)code_size_estimate;
+
+    /* --- Pass 3: emit code --------------------------------------------- */
+    {
+        u32 str_offset = 0;
+        for (i = 0; i < cg->string_count; i++) {
+            u32 str_addr = data_start + str_offset;
+            int slen = cg->strings[i].len;
+
+            emit_mov_eax_imm32(cg, ROSC_SYS_WRITE);   /* eax = 1 (SYS_WRITE) */
+            emit_mov_ebx_imm32(cg, 1);                 /* ebx = 1 (stdout fd) */
+            emit_mov_ecx_imm32(cg, str_addr);          /* ecx = string addr   */
+            emit_mov_edx_imm32(cg, (u32)slen);         /* edx = string length */
+            emit_int80(cg);                             /* int 0x80            */
+
+            str_offset += (u32)slen;
+        }
+    }
+
+    /* Emit SYS_EXIT(0) */
+    emit_mov_eax_imm32(cg, ROSC_SYS_EXIT);   /* eax = 0 (SYS_EXIT) */
+    emit_mov_ebx_imm32(cg, 0);               /* ebx = 0 (success)  */
+    emit_int80(cg);                           /* int 0x80           */
+    emit8(cg, 0xF4);                          /* hlt (safety)       */
+
+    /* Verify our estimate was correct */
+    if (cg->code_len != code_size_estimate) {
+        /* This should not happen; recalculate data_start would be needed */
+        error_report("codegen", "code size mismatch with estimate", 0, 0);
+        cg->had_error = 1;
+        return -1;
+    }
+
+    /* --- Assemble final binary: code + string data --------------------- */
+    cg->binary_len = 0;
+
+    /* Copy code section */
+    memcpy(cg->binary, cg->code, cg->code_len);
+    cg->binary_len = cg->code_len;
+
+    /* Append string data */
+    for (i = 0; i < cg->string_count; i++) {
+        int slen = cg->strings[i].len;
+        if (cg->binary_len + slen > (int)sizeof(cg->binary)) break;
+        memcpy(cg->binary + cg->binary_len, cg->strings[i].str, slen);
+        cg->binary_len += slen;
+    }
 
     return 0;
 }
@@ -148,17 +312,22 @@ void codegen_dump_code(Codegen *cg)
     int  i;
 
     puts("Generated code (hex):\n  ");
-    for (i = 0; i < cg->code_len; i++) {
-        u8 b      = cg->code[i];
+    for (i = 0; i < cg->binary_len; i++) {
+        u8 b      = cg->binary[i];
         buf[0]    = nibble_to_hex((b >> 4) & 0xF);
         buf[1]    = nibble_to_hex(b & 0xF);
         buf[2]    = ' ';
         buf[3]    = '\0';
         puts(buf);
+        /* Newline every 16 bytes for readability */
+        if ((i + 1) % 16 == 0 && i + 1 < cg->binary_len) {
+            puts("\n  ");
+        }
     }
 
     char summary[64];
-    sprintf(summary, "\n  (%d bytes)\n", cg->code_len);
+    sprintf(summary, "\n  (%d bytes: %d code + %d data)\n",
+            cg->binary_len, cg->code_len, cg->binary_len - cg->code_len);
     puts(summary);
 }
 
@@ -175,15 +344,17 @@ void codegen_dump_bindings(Codegen *cg)
 }
 
 /* -----------------------------------------------------------------------
- * Execute the generated binary in-place
+ * Execute the generated binary in-place (ring 0, for diagnostics only).
  *
- * We cast the code buffer to a function pointer and call it.  Because
- * RandomOS does not yet enforce No-Execute (NX / XD) memory protection,
- * executing from a kernel-mode data buffer is safe in ring 0.
+ * This is only useful for testing in kernel mode.  The real execution
+ * path is process_create_user() which maps the binary at USER_CODE_BASE
+ * and runs it in ring 3.
  * --------------------------------------------------------------------- */
 i32 codegen_execute(Codegen *cg)
 {
     if (cg->code_len == 0) return 0;
+    /* For ring 0 in-place test, replace the final hlt+exit with ret */
+    /* This is a legacy fallback – real execution goes through processes */
     typedef i32 (*fn_t)(void);
     fn_t fn = (fn_t)(void *)(cg->code);
     return fn();
