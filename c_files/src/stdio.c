@@ -215,6 +215,18 @@ int readline(char *buf, unsigned int max_len)
         return 0;
     }
 
+#ifdef GUI_MODE
+    {
+        terminal_t *t = term_active();
+        if (t && t->read_line) {
+            /* Delegate to the GUI terminal's own line editor so that
+             * keystrokes are read from the compositor-filled key buffer
+             * rather than the raw hardware ring buffer.                */
+            return t->read_line(buf, max_len);
+        }
+    }
+#endif
+
     unsigned int count = 0;
     while (1) {
         int ch = read_char_blocking();

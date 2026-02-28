@@ -31,8 +31,8 @@
 /** Maximum number of simultaneously-existing processes. */
 #define PROC_MAX         16u
 
-/** Kernel stack size per process (bytes).  4 KB is standard. */
-#define PROC_KSTACK_SIZE 4096u
+/** Kernel stack size per process (bytes).  32 KB prevents deep-call overflow. */
+#define PROC_KSTACK_SIZE 32768u
 
 /** CFS weight for nice 0 (baseline). */
 #define NICE0_WEIGHT     1024u

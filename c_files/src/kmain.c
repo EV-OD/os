@@ -50,6 +50,7 @@ multiboot_info_t *g_multiboot_info = (multiboot_info_t *)0;
 #include "gui/wm.h"
 #include "gui/gui_term.h"
 #include "terminal.h"
+#include "keyboard.h"   /* keyboard_flush() – clear PS/2 init residue */
 
 /*
  * Two kernel tasks for GUI mode:
@@ -189,6 +190,9 @@ void kmain(unsigned int eax, unsigned int ebx)
                 if (shell) sched_add(shell);
             }
             log_info("[kmain] entering GUI mode (CFS scheduler)");
+            /* Flush any PS/2 init residue from the keyboard ring buffer
+             * so that it cannot trigger phantom commands in the shell. */
+            keyboard_flush();
             sched_start();   /* NEVER RETURNS */
         } else {
             log_info("[kmain] GUI unavailable – entering nerd mode shell");

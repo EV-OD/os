@@ -215,14 +215,14 @@ static void gt_render_grid(gui_term_state_t *gt)
             color_t fg = *cell_fg (gt, col, row);
             color_t bg = *cell_bg (gt, col, row);
             int px = col * FONT_W;
-            int py = row * FONT_H;
+            int py = row * FONT_LINE_H;
 
-            /* Draw background cell */
-            for (int dy = 0; dy < FONT_H && py + dy < ch; dy++)
+            /* Draw background cell – full line height including gap */
+            for (int dy = 0; dy < FONT_LINE_H && py + dy < ch; dy++)
                 for (int dx = 0; dx < FONT_W && px + dx < cw; dx++)
                     fb_put_pixel(base_x + px + dx, base_y + py + dy, bg);
 
-            /* Draw glyph (bit 7 = leftmost pixel) */
+            /* Draw glyph – only FONT_H rows of actual pixel data */
             {
                 unsigned int idx = (unsigned char)c < 128u ? (unsigned char)c : 0u;
                 extern char font8x8_basic[128][8];
@@ -237,11 +237,11 @@ static void gt_render_grid(gui_term_state_t *gt)
         }
     }
 
-    /* Cursor: XOR-invert the character cell at the cursor position */
+    /* Cursor: XOR-invert the full line-height cell at the cursor position */
     {
         int px = gt->cur_col * FONT_W;
-        int py = gt->cur_row * FONT_H;
-        for (int dy = 0; dy < FONT_H && py + dy < ch; dy++)
+        int py = gt->cur_row * FONT_LINE_H;
+        for (int dy = 0; dy < FONT_LINE_H && py + dy < ch; dy++)
             for (int dx = 0; dx < FONT_W && px + dx < cw; dx++) {
                 color_t cur = fb_get_pixel(base_x + px + dx, base_y + py + dy);
                 fb_put_pixel(base_x + px + dx, base_y + py + dy, cur ^ 0x00FFFFFFu);
@@ -367,7 +367,7 @@ terminal_t *gui_term_create(wm_window_t *win)
     client_w = win->w;
     client_h = win->h - TITLE_BAR_H;
     cols = client_w / FONT_W;
-    rows = client_h / FONT_H;
+    rows = client_h / FONT_LINE_H;
 
     if (cols <= 0 || rows <= 0) return (void *)0;
 

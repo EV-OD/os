@@ -178,3 +178,12 @@ int keyboard_read_char_blocking(void)
     }
     return c;
 }
+
+void keyboard_flush(void)
+{
+    /* Drain all pending chars from the ring buffer so that PS/2 init
+     * residue (mouse ACK bytes, leftover scancodes) cannot appear as
+     * phantom keystrokes after the scheduler starts.                 */
+    while (keyboard_available())
+        keyboard_read_char();
+}

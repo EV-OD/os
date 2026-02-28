@@ -20,6 +20,9 @@
 /* Width and height of every glyph in pixels. */
 #define FONT_W  8
 #define FONT_H  8
+/** Line height including inter-line gap.  Glyphs use FONT_H rows of pixels;
+ *  the gap of (FONT_LINE_H - FONT_H) pixels are left blank between lines. */
+#define FONT_LINE_H  12
 
 /* -------------------------------------------------------------------------
  * Rendering helpers
