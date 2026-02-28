@@ -103,8 +103,8 @@ static char *uint_to_str(unsigned int n, char *buf, unsigned int buflen)
 static void draw_task_row(unsigned int row, const char *label, int nice,
                            unsigned int count, unsigned char attr)
 {
-    char nicebuf[8];
-    char cntbuf[12];
+    char nicebuf[16];
+    char cntbuf[16];
 
     /* Left column: task name (10 chars) */
     vga_puts_at(row, 0, attr, label, 10);
