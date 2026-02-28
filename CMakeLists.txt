@@ -9,6 +9,19 @@ include_directories(c_files/includes)
 include_directories(compiler/include)
 include_directories(compiler/src)
 
+# --------------------------------------------------------------------------
+# GUI mode option
+#   cmake -B build -DGUI_MODE=ON   → builds with VESA framebuffer GUI
+#   cmake -B build                 → default: text-mode shell
+# --------------------------------------------------------------------------
+option(GUI_MODE "Enable graphical desktop mode (VESA 1024x768x32)" ON)
+if(GUI_MODE)
+    add_definitions(-DGUI_MODE)
+    message(STATUS "GUI mode: ON  (VESA 1024x768x32)")
+else()
+    message(STATUS "GUI mode: OFF (VGA text mode)")
+endif()
+
 # Custom command to compile loader.s with NASM
 add_custom_command(
     OUTPUT loader.o
@@ -114,23 +127,19 @@ set_target_properties(kernel.elf PROPERTIES
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linker/link.ld"
 )
 
-# Custom command to create os.iso
+# Custom command to create os.iso using GRUB 2 (grub-mkrescue).
+# GRUB 2 honours the Multiboot VIDEO_MODE flag (bit 2) and populates
+# multiboot_info_t::framebuffer_* so fb_init() gets a valid VESA framebuffer.
+# The ISO source tree (iso/) must contain iso/boot/grub/grub.cfg.
 add_custom_command(
     OUTPUT os.iso
     COMMAND cp kernel.elf ${CMAKE_CURRENT_SOURCE_DIR}/iso/boot/kernel.elf
-    COMMAND genisoimage -R
-            -b boot/grub/stage2_eltorito
-            -no-emul-boot
-            -boot-load-size 4
-            -A os
-            -input-charset utf8
-            -quiet
-            -boot-info-table
-            -o os.iso
-            ${CMAKE_CURRENT_SOURCE_DIR}/iso
+    COMMAND grub-mkrescue -o os.iso ${CMAKE_CURRENT_SOURCE_DIR}/iso
+            --quiet
     DEPENDS kernel.elf ${CMAKE_CURRENT_SOURCE_DIR}/iso/modules/program
+            ${CMAKE_CURRENT_SOURCE_DIR}/iso/boot/grub/grub.cfg
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Creating ISO image"
+    COMMENT "Creating ISO image (GRUB 2)"
 )
 
 # Define the iso target
@@ -149,10 +158,42 @@ add_custom_command(
 )
 add_custom_target(disk_img DEPENDS ${DISK_IMG})
 
-# Define the run target
+# --------------------------------------------------------------------------
+# run  – standard launch target.
+#
+#   -vga std      exposes a VESA BIOS so GRUB can set a linear framebuffer;
+#                 required for GUI mode (gui_init / 'mode gui' command).
+#   -m 64         64 MB RAM needed for the ~3 MB VESA back-buffer.
+#   -serial ...   serial output to com1.out for kernel log messages.
+#
+# Usage:
+#   ninja run            (inside the build directory)
+#   cmake --build build --target run
+# --------------------------------------------------------------------------
 add_custom_target(run
-    COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -hda ${DISK_IMG} -serial file:com1.out
+    COMMAND qemu-system-i386
+            -cdrom os.iso
+            -m 64
+            -boot d
+            -hda ${DISK_IMG}
+            -vga std
+            -serial file:com1.out
     DEPENDS os.iso disk_img
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Running kernel with QEMU (hard disk: disk.img)"
+    COMMENT "Launching RabinOS in QEMU"
+)
+
+# --------------------------------------------------------------------------
+# run_nerd  – text-mode only (no VESA), useful for quick shell testing.
+# --------------------------------------------------------------------------
+add_custom_target(run_nerd
+    COMMAND qemu-system-i386
+            -cdrom os.iso
+            -m 32
+            -boot d
+            -hda ${DISK_IMG}
+            -serial file:com1.out
+    DEPENDS os.iso disk_img
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Launching RabinOS in QEMU (text/nerd mode, no VESA)"
 )

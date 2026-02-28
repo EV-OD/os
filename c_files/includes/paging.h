@@ -172,4 +172,26 @@ void paging_switch_directory(unsigned int *pd);
  */
 unsigned int *paging_get_kernel_directory(void);
 
+/**
+ * paging_map_mmio – identity-map a region of MMIO (device) memory into the
+ * kernel's virtual address space using 4 MB PSE page-directory entries.
+ *
+ * Because MMIO regions (e.g. VESA framebuffers) live above 0xC0000000
+ * physically (or at least outside the normal RAM area), we use the
+ * corresponding PDE slot at virtual == physical so the kernel can access
+ * them without an explicit offset.  The mapping uses Write-Through +
+ * Cache-Disabled flags as recommended for MMIO regions.
+ *
+ * @param phys_base  Physical start address of the MMIO region.
+ *                   Will be aligned down to the nearest 4 MB boundary.
+ * @param size       Byte length of the region.  Enough 4 MB PDEs are
+ *                   created to cover [phys_base, phys_base + size).
+ *
+ * @return           The virtual address corresponding to @p phys_base
+ *                   (i.e. phys_base itself, since we identity-map).
+ *                   Returns 0 on error (phys_base == 0 or conflicts with
+ *                   the kernel higher-half mapping).
+ */
+unsigned int paging_map_mmio(unsigned int phys_base, unsigned int size);
+
 #endif /* PAGING_H */

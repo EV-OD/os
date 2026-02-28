@@ -290,3 +290,48 @@ void paging_switch_directory(unsigned int *pd)
     unsigned int phys = VIRT_TO_PHYS(pd);
     __asm__ volatile("mov %0, %%cr3" :: "r"(phys) : "memory");
 }
+
+/* -------------------------------------------------------------------------
+ * paging_map_mmio
+ *
+ * Identity-maps one or more 4 MB regions in the kernel page directory so
+ * MMIO ranges (e.g. the VESA framebuffer) are accessible at virtual ==
+ * physical.  Uses Write-Through + Cache-Disabled PDE flags.
+ *
+ * MMIO regions must live above the first 4 MB (physical 0 is the kernel).
+ * We refuse to remap PDE[768..] (the kernel higher-half area).
+ * ------------------------------------------------------------------------- */
+unsigned int paging_map_mmio(unsigned int phys_base, unsigned int size)
+{
+    if (phys_base == 0 || size == 0) {
+        log_warning("[paging] paging_map_mmio: invalid args phys=0x%x size=%u",
+                    phys_base, size);
+        return 0;
+    }
+
+    /* Align phys_base down to 4 MB boundary. */
+    unsigned int aligned_base = phys_base & ~(PAGE_SIZE_4MB - 1u);
+    unsigned int end          = phys_base + size;
+
+    for (unsigned int addr = aligned_base; addr < end; addr += PAGE_SIZE_4MB) {
+        unsigned int pde_idx = addr >> 22;
+
+        /* Refuse to overwrite an already-present (non-MMIO) PDE. */
+        if (page_directory[pde_idx] & PDE_PRESENT) {
+            log_warning("[paging] paging_map_mmio: PDE[%u] already present"
+                        " (0x%x) – skipping", pde_idx, page_directory[pde_idx]);
+            continue;
+        }
+
+        /* Write-Through + Cache-Disabled + Present + RW + 4MB (PSE). */
+        unsigned int flags = PDE_PRESENT | PDE_WRITABLE | PDE_PAGE_SIZE
+                           | PDE_WRITE_THRU | PDE_CACHE_DIS;
+        page_directory[pde_idx] = addr | flags;
+        paging_invlpg((void *)addr);
+
+        log_debug("[paging] MMIO: PDE[%u] → phys 0x%x (flags 0x%x)",
+                  pde_idx, addr, flags);
+    }
+
+    return phys_base;   /* virtual == physical for identity-mapped MMIO */
+}

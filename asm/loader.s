@@ -1,21 +1,49 @@
 global loader
 global page_directory
 
-MAGIC_NUMBER    equ 0x1BADB002      ; define the magic number constant
-ALIGN_MODULES   equ 0x00000001      ; tell GRUB to align modules
+MAGIC_NUMBER    equ 0x1BADB002      ; Multiboot magic constant
+ALIGN_MODULES   equ 0x00000001      ; bit 0: align modules on page boundaries
+MEMORY_INFO     equ 0x00000002      ; bit 1: pass memory map to OS
+VIDEO_MODE      equ 0x00000004      ; bit 2: request linear framebuffer
 
-; calculate the checksum (all options + checksum should equal 0)
-CHECKSUM        equ -(MAGIC_NUMBER + ALIGN_MODULES)
+; Combined flags: align + memory info + video mode
+FLAGS           equ (ALIGN_MODULES | MEMORY_INFO | VIDEO_MODE)
+
+; Checksum: (MAGIC + FLAGS + CHECKSUM) must equal 0 mod 2^32
+CHECKSUM        equ -(MAGIC_NUMBER + FLAGS)
 
 ; Higher-half kernel constants
 KERNEL_VIRTUAL_BASE equ 0xC0000000
 KERNEL_PAGE_INDEX   equ (KERNEL_VIRTUAL_BASE >> 22)  ; PDE index 768
 
+; -------------------------------------------------------------------------
+; Multiboot header (must be within the first 8 KB of the kernel image,
+; 4-byte aligned, placed at the very start of .text).
+;
+; With FLAGS bit 2 set GRUB expects the full extended header layout even
+; when bit 16 (AOUT_KLUDGE) is clear – the five address fields must be
+; present (GRUB ignores them when bit 16 = 0) so that mode_type lands at
+; the correct fixed offset from the header start.
+; -------------------------------------------------------------------------
 section .text                        ; start of the text (code) section
-align 4                              ; the code must be 4 byte aligned
-    dd MAGIC_NUMBER                  ; write the magic number
-    dd ALIGN_MODULES                 ; write the align modules instruction
-    dd CHECKSUM                      ; write the checksum
+align 4
+    ; --- Required fields (always present) --------------------------------
+    dd MAGIC_NUMBER                  ; 0x1BADB002
+    dd FLAGS                         ; 0x00000007
+    dd CHECKSUM                      ; -(MAGIC + FLAGS)
+
+    ; --- Address fields (present when bit 16 = 0, but GRUB ignores them) -
+    dd 0                             ; header_addr   (ignored)
+    dd 0                             ; load_addr     (ignored)
+    dd 0                             ; load_end_addr (ignored)
+    dd 0                             ; bss_end_addr  (ignored)
+    dd 0                             ; entry_addr    (ignored)
+
+    ; --- Video mode hint (valid because FLAGS bit 2 = VIDEO_MODE) --------
+    dd 0                             ; mode_type: 0 = linear RGB framebuffer
+    dd 1024                          ; preferred width  (GRUB may differ)
+    dd 768                           ; preferred height (GRUB may differ)
+    dd 32                            ; preferred bits-per-pixel
 
 
 

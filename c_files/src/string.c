@@ -236,3 +236,67 @@ int sprintf(char *str, const char *format, ...)
 
     return (int)(p - str);
 }
+
+/* vsprintf: va_list variant – same logic as sprintf but accepts pre-started va_list */
+int vsprintf(char *str, const char *format, __builtin_va_list ap)
+{
+    char *p = str;
+    const char *f = format;
+
+    while (*f != '\0') {
+        if (*f == '%') {
+            f++;
+            switch (*f) {
+                case 'c': {
+                    char c = (char)__builtin_va_arg(ap, int);
+                    *p++ = c;
+                    break;
+                }
+                case 'd': {
+                    int d = __builtin_va_arg(ap, int);
+                    char buf[12];
+                    itoa(d, buf, 10);
+                    char *b = buf;
+                    while (*b) *p++ = *b++;
+                    break;
+                }
+                case 'u': {
+                    unsigned int u = __builtin_va_arg(ap, unsigned int);
+                    char buf[12];
+                    itoa((int)u, buf, 10);
+                    char *b = buf;
+                    while (*b) *p++ = *b++;
+                    break;
+                }
+                case 'x': {
+                    int x = __builtin_va_arg(ap, int);
+                    char buf[12];
+                    itoa(x, buf, 16);
+                    char *b = buf;
+                    while (*b) *p++ = *b++;
+                    break;
+                }
+                case 's': {
+                    char *s = __builtin_va_arg(ap, char *);
+                    if (!s) s = "(null)";
+                    while (*s) *p++ = *s++;
+                    break;
+                }
+                case '%': {
+                    *p++ = '%';
+                    break;
+                }
+                default:
+                    *p++ = '%';
+                    *p++ = *f;
+                    break;
+            }
+        } else {
+            *p++ = *f;
+        }
+        f++;
+    }
+
+    *p = '\0';
+    return (int)(p - str);
+}

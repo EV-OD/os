@@ -35,6 +35,12 @@ char *itoa(int value, char *str, int base);
 // formatting functions using placeholder %d for integers and %s for strings
 int sprintf(char *str, const char *format, ...);
 
+// va_list variant of sprintf
+#ifndef __builtin_va_list
+typedef __builtin_va_list va_list_t;
+#endif
+int vsprintf(char *str, const char *format, __builtin_va_list ap);
+
 
 
 

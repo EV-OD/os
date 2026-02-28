@@ -9,23 +9,56 @@
 #define FB_HIGH_BYTE_COMMAND    14
 #define FB_LOW_BYTE_COMMAND     15
 
-/* VGA Colors */
+/* VGA Colors
+ * These are defined with #ifndef guards so that gui/color.h can safely
+ * #undef and redefine the overlapping names as 32-bit RGB values without
+ * a "macro redefined" error, regardless of include order. */
+#ifndef COLOR_BLACK
 #define COLOR_BLACK             0x00
+#endif
+#ifndef COLOR_BLUE
 #define COLOR_BLUE              0x01
+#endif
+#ifndef COLOR_GREEN
 #define COLOR_GREEN             0x02
+#endif
+#ifndef COLOR_CYAN
 #define COLOR_CYAN              0x03
+#endif
+#ifndef COLOR_RED
 #define COLOR_RED               0x04
+#endif
+#ifndef COLOR_MAGENTA
 #define COLOR_MAGENTA           0x05
+#endif
 #define COLOR_BROWN             0x06
+#ifndef COLOR_LIGHT_GREY
 #define COLOR_LIGHT_GREY        0x07
+#endif
+#ifndef COLOR_DARK_GREY
 #define COLOR_DARK_GREY         0x08
+#endif
+#ifndef COLOR_LIGHT_BLUE
 #define COLOR_LIGHT_BLUE        0x09
+#endif
+#ifndef COLOR_LIGHT_GREEN
 #define COLOR_LIGHT_GREEN       0x0A
+#endif
+#ifndef COLOR_LIGHT_CYAN
 #define COLOR_LIGHT_CYAN        0x0B
+#endif
+#ifndef COLOR_LIGHT_RED
 #define COLOR_LIGHT_RED         0x0C
+#endif
+#ifndef COLOR_LIGHT_MAGENTA
 #define COLOR_LIGHT_MAGENTA     0x0D
+#endif
+#ifndef COLOR_LIGHT_BROWN
 #define COLOR_LIGHT_BROWN       0x0E
+#endif
+#ifndef COLOR_WHITE
 #define COLOR_WHITE             0x0F
+#endif
 
 /* Framebuffer Constants */
 #define FB_DEFAULT_COLOR        0x07
@@ -102,6 +135,7 @@ void putchar_color(char c, unsigned char fg);
 void puts_color(const char *buf, unsigned char fg);
 
 /* Input Functions */
+int read_char_blocking(void); /* Raw keyboard read – no echo, no GUI repaint */
 int getchar(void);           /* Blocking read of one char */
 int readline(char *buf, unsigned int max_len); /* Reads up to newline (max_len includes terminator) */
 int scanf(const char *fmt, ...); /* Minimal scanf: supports %c, %s, %d */

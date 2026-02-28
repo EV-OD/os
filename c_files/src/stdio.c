@@ -1,6 +1,9 @@
 #include "stdio.h"
 #include "keyboard.h"
 #include "string.h"
+#ifdef GUI_MODE
+#include "terminal.h"   /* term_active() – routes input through GUI terminal */
+#endif
 
 typedef __builtin_va_list va_list;
 #define va_start(ap, last) __builtin_va_start(ap, last)
@@ -170,13 +173,23 @@ int write(char *buf, unsigned int len)
     return 0;
 }
 
-static int read_char_blocking(void)
+int read_char_blocking(void)
 {
     return keyboard_read_char_blocking();
 }
 
 int getchar(void)
 {
+#ifdef GUI_MODE
+    /* In GUI mode delegate to the active terminal so that
+     * gt_get_char() can repaint the compositor while waiting.       */
+    {
+        terminal_t *t = term_active();
+        if (t && t->get_char && t->get_char != getchar) {
+            return t->get_char();
+        }
+    }
+#endif
     int ch = read_char_blocking();
     putchar((char)ch);
     return ch;

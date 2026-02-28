@@ -34,6 +34,23 @@
 #include "string.h"
 #include "shell.h"
 #include "boot_anim.h"
+/* GUI mode (compiled in when GUI_MODE is defined) */
+#ifdef GUI_MODE
+#include "gui/fb.h"
+#include "gui/gui_init.h"
+#include "gui/gui_term.h"   /* gui_term_create – also used by cmd_mode */
+#endif
+
+/* Global multiboot pointer – stored early in kmain so that shell's
+ * 'mode gui' command can call gui_init() any time after boot.       */
+multiboot_info_t *g_multiboot_info = (multiboot_info_t *)0;
+
+#ifdef GUI_MODE
+#include "gui/desktop.h"
+#include "gui/wm.h"
+#include "gui/gui_term.h"
+#include "terminal.h"
+#endif
 
 /* -------------------------------------------------------------------------
  * Helpers for filesystem test
@@ -51,6 +68,9 @@ static int fs_list_cb(const vfs_dirent_t *d, void *userdata)
 
 void kmain(unsigned int eax, unsigned int ebx)
 {
+    /* Save multiboot pointer globally so shell's 'mode gui' can use it. */
+    g_multiboot_info = (multiboot_info_t *)ebx;
+
     /*
      * Forward the Multiboot magic and info pointer to kernel_init().
      * ebx is the virtual address forwarded by loader.s
@@ -119,16 +139,40 @@ void kmain(unsigned int eax, unsigned int ebx)
     boot_animation();
 
     /* ------------------------------------------------------------------
-     * Enter shell – nerd mode (text-only).
-     * The shell uses getchar() which spin-waits on the keyboard IRQ.
-     * Interrupts must remain enabled for keyboard + PIT to work.
-     *
-     * NOTE: We run the shell directly from kmain rather than through
-     * the CFS scheduler.  The scheduler + task demos are still available
-     * and can be launched via "tasks" command in the future.
+     * GUI mode – try to initialise VESA framebuffer.
+     * If GRUB provided an RGB linear framebuffer, launch the desktop.
+     * Otherwise fall back to the classic text-mode nerd-mode shell.
      * ------------------------------------------------------------------ */
+#ifdef GUI_MODE
+    {
+        multiboot_info_t *mb_ptr = (multiboot_info_t *)ebx;
+        if (gui_init(mb_ptr) == 0) {
+            /* Create a full-screen terminal window */
+            int sw = (int)fb_width();
+            int sh = (int)fb_height();
+            wm_window_t *term_win =
+                wm_create(0, 0, sw, sh - TASKBAR_H, "Terminal");
+            if (term_win) {
+                terminal_t *t = gui_term_create(term_win);
+                if (t) {
+                    term_set_active(t);
+                }
+            }
+            desktop_init();
+            /* desktop_run() calls the event loop; shell reads from
+             * the active GUI terminal via term_active()->get_char(). */
+            log_info("[kmain] entering GUI mode");
+            shell_run();   /* shell uses term_active() which is the GUI term */
+            /* Unreachable */
+        } else {
+            log_info("[kmain] GUI unavailable – entering nerd mode shell");
+            shell_run();
+        }
+    }
+#else
     log_info("[kmain] entering shell (nerd mode)");
     shell_run();
+#endif
 
     /* Unreachable */
     while (1) {}

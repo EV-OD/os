@@ -25,6 +25,12 @@
 #include "kheap.h"
 #include "log.h"
 #include "pit.h"
+/* GUI mode – only the opaque launcher; no color/wm/fb types visible here.
+ * This avoids the 32-bit color_t vs unsigned-char conflict in puts_color(). */
+#ifdef GUI_MODE
+#include "multiboot.h"
+#include "gui/gui_init.h"
+#endif
 
 /* -------------------------------------------------------------------------
  * OS mode (default: nerd mode)
@@ -665,8 +671,24 @@ static int cmd_mode(int argc, char **argv)
         os_set_mode(OS_MODE_NERD);
         puts("Switched to nerd mode (shell-only)\n");
     } else if (strcmp(argv[1], "gui") == 0) {
-        puts_color("GUI mode is not yet implemented.\n", COLOR_LIGHT_BROWN);
-        puts("Staying in nerd mode.\n");
+#ifdef GUI_MODE
+        extern multiboot_info_t *g_multiboot_info;
+        if (current_mode == OS_MODE_GUI) {
+            puts_color("Already in GUI mode.\n", COLOR_LIGHT_CYAN);
+            return 0;
+        }
+        puts("Initialising GUI...\n");
+        if (gui_launch(g_multiboot_info) == 0) {
+            os_set_mode(OS_MODE_GUI);
+            puts("GUI mode active. Type commands as usual.\n");
+        } else {
+            puts("GUI init failed: no VESA framebuffer.\n");
+            puts("Tip: run QEMU with -vga std\n");
+        }
+#else
+        puts("GUI support not compiled in.\n");
+        puts("Rebuild: cmake -B build -DGUI_MODE=ON\n");
+#endif
     } else {
         puts("Unknown mode. Use: mode <nerd|gui>\n");
         return -1;
