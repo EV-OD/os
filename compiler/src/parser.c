@@ -67,6 +67,15 @@ static AstNode *parse_primary(Parser *p)
         return n;
     }
 
+    if (t->type == TOK_STRING) {
+        tok_advance(p);
+        AstNode *n = ast_alloc(AST_STRING);
+        if (!n) return NULL;
+        strncpy(n->name, t->text, MAX_IDENT_LEN - 1);
+        n->number = t->int_val;   /* string length stored in int_val */
+        return n;
+    }
+
     if (t->type == TOK_IDENT) {
         tok_advance(p);
         AstNode *n = ast_alloc(AST_IDENT);
@@ -183,7 +192,29 @@ static AstNode *parse_let_stmt(Parser *p)
 }
 
 /* -----------------------------------------------------------------------
+ * print_stmt  ::= "print" "(" expr ")"
+ * --------------------------------------------------------------------- */
+static AstNode *parse_print_stmt(Parser *p)
+{
+    /* "print" already confirmed by caller */
+    tok_advance(p);
+
+    if (!tok_expect(p, TOK_LPAREN, "expected '(' after 'print'")) return NULL;
+
+    AstNode *expr = parse_expr(p);
+    if (!expr || p->had_error) return NULL;
+
+    if (!tok_expect(p, TOK_RPAREN, "expected ')' after print argument")) return NULL;
+
+    AstNode *node = ast_alloc(AST_PRINT);
+    if (!node) return NULL;
+    node->expr = expr;
+    return node;
+}
+
+/* -----------------------------------------------------------------------
  * program  ::= { newline } { stmt { newline } }
+ * stmt     ::= let_stmt | print_stmt
  * --------------------------------------------------------------------- */
 AstNode *parser_parse(Parser *p)
 {
@@ -196,17 +227,21 @@ AstNode *parser_parse(Parser *p)
         skip_newlines(p);
         if (tok_check(p, TOK_EOF)) break;
 
-        /* Only let-statements in Phase 1 */
-        if (!tok_check(p, TOK_LET)) {
+        AstNode *stmt = NULL;
+
+        if (tok_check(p, TOK_LET)) {
+            stmt = parse_let_stmt(p);
+        } else if (tok_check(p, TOK_PRINT)) {
+            stmt = parse_print_stmt(p);
+        } else {
             Token *t = tok_peek(p);
             char   buf[64];
-            sprintf(buf, "expected 'let', got [%s]", token_type_name(t->type));
+            sprintf(buf, "expected 'let' or 'print', got [%s]", token_type_name(t->type));
             error_report("parser", buf, t->line, t->col);
             p->had_error = 1;
             break;
         }
 
-        AstNode *stmt = parse_let_stmt(p);
         if (!stmt || p->had_error) break;
 
         if (prog->stmt_count < MAX_BINDINGS)

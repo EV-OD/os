@@ -113,6 +113,16 @@ unsigned int paging_cr3(void);
 void paging_invlpg(void *vaddr);
 void paging_map_4mb(unsigned int index, unsigned int phys_frame, unsigned int flags);
 
+/**
+ * paging_map_full_kernel_ram – extend kernel virtual memory mapping to cover
+ * all physical RAM up to `total_bytes`.
+ *
+ * Adds 4 MB PSE entries in PDE[769..] so that PHYS_TO_VIRT() works for any
+ * physical address returned by pfa_alloc_frame().  Must be called BEFORE any
+ * code that uses PHYS_TO_VIRT on frames above 4 MB.
+ */
+void paging_map_full_kernel_ram(unsigned int total_bytes);
+
 /* -------------------------------------------------------------------------
  * Per-process page directory management (user-mode support)
  * ------------------------------------------------------------------------- */

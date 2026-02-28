@@ -22,6 +22,8 @@ typedef enum {
     AST_IDENT,
     AST_BINOP,
     AST_LET,
+    AST_PRINT,
+    AST_STRING,
     AST_PROGRAM
 } AstType;
 

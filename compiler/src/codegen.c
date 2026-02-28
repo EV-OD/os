@@ -194,6 +194,21 @@ static void add_binding_string(Codegen *cg, const char *name, i32 val)
 }
 
 /* -----------------------------------------------------------------------
+ * Add a raw string to the data section (used by print()).
+ * --------------------------------------------------------------------- */
+static void add_raw_string(Codegen *cg, const char *str, int len)
+{
+    if (cg->string_count >= MAX_BINDINGS) return;
+
+    CodegenString *s = &cg->strings[cg->string_count];
+    if (len > (int)sizeof(s->str) - 1) len = (int)sizeof(s->str) - 1;
+    memcpy(s->str, str, len);
+    s->str[len] = '\0';
+    s->len = len;
+    cg->string_count++;
+}
+
+/* -----------------------------------------------------------------------
  * Main code-generation pass
  *
  * 1. Constant-fold all let-bindings, build binding table + strings
@@ -211,20 +226,39 @@ int codegen_run(Codegen *cg, AstNode *prog)
     /* --- Pass 1: constant-fold all bindings and build strings ----------- */
     for (i = 0; i < prog->stmt_count; i++) {
         AstNode *stmt = prog->stmts[i];
-        if (!stmt || stmt->type != AST_LET) continue;
+        if (!stmt) continue;
 
-        i32 val;
-        if (eval_expr(cg, stmt->expr, &val) != 0) return -1;
+        if (stmt->type == AST_LET) {
+            i32 val;
+            if (eval_expr(cg, stmt->expr, &val) != 0) return -1;
 
-        /* Record in the binding table */
-        if (cg->bind_count < MAX_BINDINGS) {
-            strncpy(cg->bind_name[cg->bind_count], stmt->name, MAX_IDENT_LEN - 1);
-            cg->bind_val[cg->bind_count] = val;
-            cg->bind_count++;
+            /* Record in the binding table */
+            if (cg->bind_count < MAX_BINDINGS) {
+                strncpy(cg->bind_name[cg->bind_count], stmt->name, MAX_IDENT_LEN - 1);
+                cg->bind_val[cg->bind_count] = val;
+                cg->bind_count++;
+            }
+
+            /* Build embedded string */
+            add_binding_string(cg, stmt->name, val);
+
+        } else if (stmt->type == AST_PRINT) {
+            if (stmt->expr && stmt->expr->type == AST_STRING) {
+                /* print("string literal") – embed the string directly */
+                int slen = stmt->expr->number; /* string length */
+                if (slen <= 0) slen = strlen(stmt->expr->name);
+                add_raw_string(cg, stmt->expr->name, slen);
+            } else {
+                /* print(numeric_expr) – evaluate and convert to "value\n" */
+                i32 val;
+                if (eval_expr(cg, stmt->expr, &val) != 0) return -1;
+                char vbuf[24];
+                int  vlen = i32_to_str(val, vbuf, sizeof(vbuf));
+                vbuf[vlen++] = '\n';
+                vbuf[vlen]   = '\0';
+                add_raw_string(cg, vbuf, vlen);
+            }
         }
-
-        /* Build embedded string */
-        add_binding_string(cg, stmt->name, val);
     }
 
     /* --- Pass 2: calculate code size first (for data offsets) ----------- */

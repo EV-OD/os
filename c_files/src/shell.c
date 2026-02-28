@@ -802,9 +802,13 @@ static int cmd_sample(int argc, char **argv)
         "// Compile with:  rosc hello.ros\n"
         "// Run with:      ./hello.rox\n"
         "\n"
+        "print(\"Hello, RandomOS!\\n\")\n"
+        "\n"
         "let x: i32 = 42\n"
         "let y: i32 = x * 2 + 8\n"
-        "let answer: i32 = (x + y) / 2\n";
+        "let answer: i32 = (x + y) / 2\n"
+        "\n"
+        "print(answer)\n";
 
     vfs_write(fd, sample_src, strlen(sample_src));
     vfs_close(fd);

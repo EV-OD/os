@@ -86,6 +86,57 @@ void paging_map_4mb(unsigned int index, unsigned int phys_frame, unsigned int fl
               index, (unsigned int)vaddr, phys_frame, page_directory[index]);
 }
 
+/* -------------------------------------------------------------------------
+ * paging_map_full_kernel_ram
+ *
+ * The boot page directory (loader.s) only maps the first 4 MB of physical
+ * RAM via PDE[768].  The PFA, however, manages ALL physical frames reported
+ * by the Multiboot memory map – often 32 MB or more.  Any code that calls
+ * pfa_alloc_frame() and then accesses the frame via PHYS_TO_VIRT() will
+ * page-fault if the frame is above 4 MB.
+ *
+ * This function extends the mapping: for every 4 MB chunk of physical RAM
+ * it adds a 4 MB PSE entry in the kernel page directory so that the entire
+ * physical address range is accessible through the higher-half virtual
+ * addresses.
+ *
+ * Must be called AFTER pfa_init() (so we know how much RAM exists) and
+ * BEFORE any user-mode process creation (which allocates frames that may
+ * be above 4 MB).
+ * ------------------------------------------------------------------------- */
+void paging_map_full_kernel_ram(unsigned int total_bytes)
+{
+    unsigned int pde_count = (total_bytes + PAGE_SIZE_4MB - 1) / PAGE_SIZE_4MB;
+    unsigned int max_pdes  = PAGE_DIR_ENTRIES - KERNEL_PAGE_INDEX;
+    unsigned int i, mapped = 0;
+
+    if (pde_count > max_pdes)
+        pde_count = max_pdes;
+
+    for (i = 0; i < pde_count; i++) {
+        unsigned int pde_idx = KERNEL_PAGE_INDEX + i;
+
+        /* Skip entries already present (e.g. PDE[768] from loader.s). */
+        if (page_directory[pde_idx] & PDE_PRESENT)
+            continue;
+
+        /* Map 4 MB PSE page: virtual [KERNEL_VIRTUAL_BASE + i*4MB, ...)
+         *                    → physical [i*4MB, ...) */
+        page_directory[pde_idx] = (i * PAGE_SIZE_4MB) | PDE_4MB_RW;
+        mapped++;
+    }
+
+    /* Reload CR3 to flush the entire TLB. */
+    {
+        unsigned int cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+    }
+
+    log_info("[paging] extended kernel mapping: %d new 4MB pages (%d MB total)",
+             (int)mapped, (int)(pde_count * 4));
+}
+
 /* =========================================================================
  * Per-process page directory management  (4 KB page tables)
  * ========================================================================= */

@@ -5,6 +5,7 @@
 #include "string.h"
 #include "sched.h"
 #include "pit.h"
+#include "process.h"
 
 static isr_handler_t handlers[IDT_NUM_ENTRIES];
 
@@ -20,6 +21,62 @@ static void timer_stub(struct cpu_state *cpu, struct stack_state *stack, unsigne
     (void)stack;
     (void)interrupt;
     /* EOI is sent by interrupt_handler after all handlers run. */
+}
+
+/*
+ * Page Fault (#PF, vector 14) handler.
+ *
+ * Reads the CR2 register (faulting linear address) and the CPU-pushed
+ * error code to produce a diagnostic log on the serial port.
+ *
+ * Error-code bits (Intel SDM Vol. 3A §4.7):
+ *   bit 0 (P)   : 0 = not-present page, 1 = protection violation
+ *   bit 1 (W/R) : 0 = read access, 1 = write access
+ *   bit 2 (U/S) : 0 = supervisor mode, 1 = user mode
+ */
+static void page_fault_handler(struct cpu_state *cpu, struct stack_state *stack,
+                               unsigned int interrupt)
+{
+    (void)cpu;
+    (void)interrupt;
+
+    unsigned int cr2;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+
+    unsigned int err = stack->error_code;
+    char buf[128];
+
+    sprintf(buf, "[#PF] CR2=0x%x EIP=0x%x err=0x%x CS=0x%x",
+            cr2, stack->eip, err, stack->cs);
+    serial_write(buf);
+    serial_write("\r\n");
+
+    sprintf(buf, "[#PF] %s, %s, %s mode",
+            (err & 1) ? "protection" : "not-present",
+            (err & 2) ? "write"      : "read",
+            (err & 4) ? "user"       : "kernel");
+    serial_write(buf);
+    serial_write("\r\n");
+
+    /* If the fault came from user mode, kill the current process. */
+    if (err & 4) {
+        process_t *cur = sched_current();
+        if (cur) {
+            sprintf(buf, "[#PF] killing user process '%s' pid=%d",
+                    cur->name ? cur->name : "?", (int)cur->pid);
+            serial_write(buf);
+            serial_write("\r\n");
+
+            cur->exit_status = -14;
+            cur->state       = PROC_DEAD;
+            /* Spin until the scheduler switches us out. */
+            for (;;) { __asm__ volatile("sti; hlt"); }
+        }
+    }
+
+    /* Kernel-mode page fault – unrecoverable.  Halt the CPU. */
+    serial_write("[#PF] KERNEL PAGE FAULT – halting.\r\n");
+    for (;;) { __asm__ volatile("cli; hlt"); }
 }
 
 /* ISR/IRQ stubs defined in asm/isr.s */
@@ -100,6 +157,9 @@ void isr_install(void)
 
     /* Register a default handler for the PIT timer to avoid "Unhandled interrupt: 32" spam. */
     register_interrupt_handler(32, timer_stub);
+
+    /* Register the page-fault handler (#PF, vector 14) for diagnostics. */
+    register_interrupt_handler(14, page_fault_handler);
 
     /* Syscall gate – DPL=3 so ring-3 code can invoke int 0x80. */
     idt_set_gate(128, (unsigned int)isr128, GDT_KERNEL_CODE_SELECTOR,

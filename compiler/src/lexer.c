@@ -71,11 +71,12 @@ static void scan_ident(Lexer *l)
 
     /* Keyword / type classification */
     TokenType type;
-    if      (strcmp(buf, "let")  == 0) type = TOK_LET;
-    else if (strcmp(buf, "i32")  == 0) type = TOK_TYPE_I32;
-    else if (strcmp(buf, "u32")  == 0) type = TOK_TYPE_U32;
-    else if (strcmp(buf, "bool") == 0) type = TOK_TYPE_BOOL;
-    else                               type = TOK_IDENT;
+    if      (strcmp(buf, "let")   == 0) type = TOK_LET;
+    else if (strcmp(buf, "print") == 0) type = TOK_PRINT;
+    else if (strcmp(buf, "i32")   == 0) type = TOK_TYPE_I32;
+    else if (strcmp(buf, "u32")   == 0) type = TOK_TYPE_U32;
+    else if (strcmp(buf, "bool")  == 0) type = TOK_TYPE_BOOL;
+    else                                type = TOK_IDENT;
 
     Token *t = new_tok(l, type, line, col);
     if (t) strncpy(t->text, buf, MAX_IDENT_LEN - 1);
@@ -128,6 +129,35 @@ int lexer_tokenize(Lexer *l)
         /* Numbers */
         if (is_digit(c)) { scan_number(l); continue; }
 
+        /* String literals */
+        if (c == '"') {
+            advance_char(l);   /* consume opening " */
+            int sline = l->line, scol = l->col;
+            char sbuf[MAX_IDENT_LEN];
+            int  si = 0;
+            while (peek_char(l) != '"' && peek_char(l) != '\0' && peek_char(l) != '\n') {
+                char ch = advance_char(l);
+                if (ch == '\\') {
+                    char esc = peek_char(l);
+                    if (esc == 'n')  { advance_char(l); if (si < MAX_IDENT_LEN - 1) sbuf[si++] = '\n'; }
+                    else if (esc == 't') { advance_char(l); if (si < MAX_IDENT_LEN - 1) sbuf[si++] = '\t'; }
+                    else if (esc == '\\') { advance_char(l); if (si < MAX_IDENT_LEN - 1) sbuf[si++] = '\\'; }
+                    else if (esc == '"') { advance_char(l); if (si < MAX_IDENT_LEN - 1) sbuf[si++] = '"'; }
+                    else { if (si < MAX_IDENT_LEN - 1) sbuf[si++] = ch; }
+                } else {
+                    if (si < MAX_IDENT_LEN - 1) sbuf[si++] = ch;
+                }
+            }
+            if (peek_char(l) == '"') advance_char(l);  /* consume closing " */
+            sbuf[si] = '\0';
+            Token *st = new_tok(l, TOK_STRING, sline, scol);
+            if (st) {
+                strncpy(st->text, sbuf, MAX_IDENT_LEN - 1);
+                st->int_val = si;   /* store string length in int_val */
+            }
+            continue;
+        }
+
         /* Identifiers / keywords */
         if (is_alpha(c)) { scan_ident(l);  continue; }
 
@@ -168,9 +198,11 @@ const char *token_type_name(TokenType t)
         case TOK_LPAREN:    return "(";
         case TOK_RPAREN:    return ")";
         case TOK_LET:       return "let";
+        case TOK_PRINT:     return "print";
         case TOK_COLON:     return ":";
         case TOK_EQ:        return "=";
         case TOK_IDENT:     return "IDENT";
+        case TOK_STRING:    return "STRING";
         case TOK_TYPE_I32:  return "i32";
         case TOK_TYPE_U32:  return "u32";
         case TOK_TYPE_BOOL: return "bool";

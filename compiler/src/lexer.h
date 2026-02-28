@@ -31,9 +31,11 @@ typedef enum {
     TOK_LPAREN,     /* (                                  */
     TOK_RPAREN,     /* )                                  */
     TOK_LET,        /* let                                */
+    TOK_PRINT,      /* print                              */
     TOK_COLON,      /* :                                  */
     TOK_EQ,         /* =                                  */
     TOK_IDENT,      /* user-defined identifier            */
+    TOK_STRING,     /* "..." string literal               */
     TOK_TYPE_I32,   /* i32                                */
     TOK_TYPE_U32,   /* u32                                */
     TOK_TYPE_BOOL,  /* bool                               */

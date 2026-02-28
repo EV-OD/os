@@ -71,6 +71,16 @@ void kernel_init(unsigned int mb_magic, multiboot_info_t *mb)
         pfa_init(mb,
                  (unsigned int)&kernel_physical_start,
                  (unsigned int)&kernel_physical_end);
+
+        /*
+         * Extend kernel page-directory mapping so PHYS_TO_VIRT() works for
+         * ALL physical frames returned by the PFA, not just the first 4 MB.
+         * mem_upper is in KiB starting from 1 MB; add the first 1 MB back.
+         */
+        if (mb->flags & MULTIBOOT_INFO_MEMORY) {
+            unsigned int total_ram = ((unsigned int)mb->mem_upper + 1024u) * 1024u;
+            paging_map_full_kernel_ram(total_ram);
+        }
     } else {
         log_warning("[kernel_init] bad Multiboot magic 0x%x – skipping PFA",
                     mb_magic);

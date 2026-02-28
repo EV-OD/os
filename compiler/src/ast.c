@@ -70,6 +70,16 @@ void ast_dump(AstNode *node, int indent)
             ast_dump(node->expr, indent + 1);
             break;
 
+        case AST_PRINT:
+            puts("Print\n");
+            ast_dump(node->expr, indent + 1);
+            break;
+
+        case AST_STRING:
+            sprintf(buf, "String(\"%s\")\n", node->name);
+            puts(buf);
+            break;
+
         case AST_PROGRAM: {
             int i;
             puts("Program\n");

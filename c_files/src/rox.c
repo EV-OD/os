@@ -67,7 +67,7 @@ int rox_load_and_run(const char *path, int argc, char **argv)
         return -2;
     }
 
-    log_info("[rox] name=%.11s  code_size=%u  entry_offset=%u",
+    log_info("[rox] name=%s  code_size=%u  entry_offset=%u",
              hdr.name, hdr.code_size, hdr.entry_offset);
 
     /* Allocate buffer for the code section */
@@ -95,12 +95,20 @@ int rox_load_and_run(const char *path, int argc, char **argv)
     }
 
     /* --- Spawn a user-mode process ------------------------------------ */
+
+    /* hdr.name is stack-local; allocate a persistent copy for the proc. */
+    char *proc_name = (char *)kmalloc(12);
+    if (proc_name) {
+        memcpy(proc_name, hdr.name, 12);
+        proc_name[11] = '\0';
+    }
+
     process_t *proc = process_create_user(
-        hdr.name,          /* process name      */
-        code,              /* code buffer       */
-        hdr.code_size,     /* code size         */
-        hdr.entry_offset,  /* entry offset      */
-        0                  /* nice = 0          */
+        proc_name ? proc_name : "rox",  /* process name      */
+        code,                            /* code buffer       */
+        hdr.code_size,                   /* code size         */
+        hdr.entry_offset,                /* entry offset      */
+        0                                /* nice = 0          */
     );
 
     /* Free the code buffer – process_create_user copies it into user pages */
@@ -108,21 +116,24 @@ int rox_load_and_run(const char *path, int argc, char **argv)
 
     if (!proc) {
         log_error("[rox] failed to create user process for %s", path);
+        if (proc_name) kfree(proc_name);
         return -4;
     }
 
     /* Add to scheduler and wait for completion */
     sched_add(proc);
 
-    log_info("[rox] spawned '%s' as pid=%d, waiting...", hdr.name, (int)proc->pid);
+    log_info("[rox] spawned '%s' as pid=%d, waiting...", proc->name, (int)proc->pid);
 
     int exit_status = process_wait(proc->pid);
 
     log_info("[rox] '%s' (pid=%d) exited with status %d",
-             hdr.name, (int)proc->pid, exit_status);
+             proc->name, (int)proc->pid, exit_status);
 
-    /* Clean up the dead process */
+    /* Clean up the dead process (also frees proc_name via proc->name). */
+    /* Note: process_destroy frees kstack and page_dir but not name. */
     process_destroy(proc);
+    if (proc_name) kfree(proc_name);
 
     return exit_status;
 }

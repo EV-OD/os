@@ -144,7 +144,12 @@ For each `let` binding, the codegen:
 2. Builds an embedded string `"name = value\n"`
 3. Emits: `mov eax, 1; mov ebx, 1; mov ecx, <str_addr>; mov edx, <len>; int 0x80`
 
-After all bindings, emits: `mov eax, 0; mov ebx, 0; int 0x80; hlt`
+For each `print()` call:
+- `print("string literal")` — embeds the string in the data section, emits SYS_WRITE
+- `print(expr)` — evaluates `expr` at compile time, converts to `"value\n"`, emits SYS_WRITE
+- Supports escape sequences in string literals: `\n`, `\t`, `\\`, `\"`
+
+After all statements, emits: `mov eax, 0; mov ebx, 0; int 0x80; hlt`
 
 String addresses are absolute (base = `0x08048000 + code_length`).
 
