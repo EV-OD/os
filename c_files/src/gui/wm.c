@@ -334,9 +334,15 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
     if (drag_win && lbtn) {
         drag_win->x = mx - drag_off_x;
         drag_win->y = my - drag_off_y;
-        /* keep on screen */
+        /* keep window title bar on screen */
         if (drag_win->x < 0) drag_win->x = 0;
         if (drag_win->y < 0) drag_win->y = 0;
+        {
+            int max_x = (int)fb_width()  - drag_win->w;
+            int max_y = (int)fb_height() - TITLE_BAR_H;
+            if (drag_win->x > max_x) drag_win->x = max_x;
+            if (drag_win->y > max_y) drag_win->y = max_y;
+        }
         wm_invalidate_all();
         prev_lbtn = lbtn;
         return;
