@@ -440,6 +440,21 @@ int fat32_delete_file(fat32_context_t *ctx,
                       const fat_dir_loc_t *loc);
 
 /**
+ * fat32_format – write a fresh FAT32 filesystem (super-floppy layout).
+ *
+ * Creates a FAT32 volume starting at partition_lba with the given total
+ * sector count.  Writes the BPB, FSInfo, backup boot sector, two FAT
+ * copies, and an empty root directory cluster.
+ *
+ * This is intended for first-boot initialisation when the disk is blank.
+ *
+ * @param partition_lba   LBA of the volume (0 for super-floppy).
+ * @param total_sectors   Number of 512-byte sectors in the volume.
+ * @return                0 on success, -1 on error.
+ */
+int fat32_format(unsigned int partition_lba, unsigned int total_sectors);
+
+/**
  * fat32_dump_info – log the parsed filesystem parameters to the serial port.
  *
  * Useful during development to verify that the boot sector was read correctly.

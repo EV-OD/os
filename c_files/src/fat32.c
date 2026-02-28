@@ -464,6 +464,193 @@ int fat32_read_file(fat32_context_t *ctx, const fat_dir_entry_t *entry, void *bu
     return bytes_read;
 }
 
+/* =========================================================================
+ * fat32_format – write a fresh FAT32 filesystem to a blank disk
+ *
+ * Layout (super-floppy, all offsets relative to partition_lba):
+ *   Sector  0       : Volume Boot Record (BPB + EBPB)
+ *   Sector  1       : FSInfo structure
+ *   Sector  6       : Backup boot sector
+ *   Sector  7       : Backup FSInfo
+ *   Sector 32..     : FAT #1
+ *   Sector 32+FS..  : FAT #2
+ *   First data sect : Root directory (cluster 2, zeroed)
+ * ========================================================================= */
+
+int fat32_format(unsigned int partition_lba, unsigned int total_sectors)
+{
+    /* ---- tuneable parameters ---- */
+    const unsigned int bytes_per_sector    = 512;
+    const unsigned int reserved_sectors    = 32;
+    const unsigned int num_fats            = 2;
+    const unsigned int root_cluster        = 2;   /* always cluster 2 */
+    const unsigned char media_type         = 0xF8; /* hard disk */
+
+    /* Choose sectors_per_cluster so the volume lands in FAT32 range.
+     * FAT32 requires >= 65525 data clusters.  Pick the largest SPC that
+     * still exceeds that threshold; fall back to 1 if nothing else works. */
+    unsigned int spc = 1;
+    {
+        /* Try SPC values from 64 down to 1; pick the first that gives
+         * enough clusters for FAT32. */
+        unsigned int try_spc;
+        for (try_spc = 64; try_spc >= 1; try_spc >>= 1) {
+            /* Rough estimate – ignore FAT overhead for the comparison */
+            unsigned int est_data = total_sectors - reserved_sectors;
+            unsigned int est_clusters = est_data / try_spc;
+            if (est_clusters >= 65525) {
+                spc = try_spc;
+                break;
+            }
+        }
+    }
+
+    /* ---- compute FAT size using the Microsoft formula ---- */
+    /*   tmp1 = TotalSectors - ReservedSectors
+     *   tmp2 = (256 * SecPerClus + NumFATs) / 2   [for FAT32]
+     *   FATSz = ceil(tmp1 / tmp2)                                        */
+    unsigned int tmp1 = total_sectors - reserved_sectors;
+    unsigned int tmp2 = ((256 * spc) + num_fats) / 2;
+    if (tmp2 == 0) { log_error("[fat32] format: bad params"); return -1; }
+    unsigned int fat_size = (tmp1 + (tmp2 - 1)) / tmp2;
+
+    log_info("[fat32] formatting: total_sectors=%u spc=%u fat_size=%u",
+             total_sectors, spc, fat_size);
+
+    /* ---- VBR (sector 0) ---- */
+    unsigned char vbr[512];
+    memset(vbr, 0, sizeof(vbr));
+
+    /* Jump instruction: EB 58 90  (JMP SHORT 0x5A ; NOP) */
+    vbr[0] = 0xEB; vbr[1] = 0x58; vbr[2] = 0x90;
+    /* OEM name */
+    memcpy(&vbr[3], "MYOS    ", 8);
+
+    /* BPB – common fields (offsets per FAT spec) */
+    fat_BS_t *bpb = (fat_BS_t *)vbr;
+    bpb->bytes_per_sector       = (unsigned short)bytes_per_sector;
+    bpb->sectors_per_cluster    = (unsigned char)spc;
+    bpb->reserved_sector_count  = (unsigned short)reserved_sectors;
+    bpb->table_count            = (unsigned char)num_fats;
+    bpb->root_entry_count       = 0;          /* 0 for FAT32 */
+    bpb->total_sectors_16       = 0;          /* use 32-bit field */
+    bpb->media_type             = media_type;
+    bpb->table_size_16          = 0;          /* 0 for FAT32 */
+    bpb->sectors_per_track      = 63;
+    bpb->head_side_count        = 16;
+    bpb->hidden_sector_count    = partition_lba;
+    bpb->total_sectors_32       = total_sectors;
+
+    /* Extended BPB (FAT32-specific, at byte 36) */
+    fat_extBS_32_t *ext = (fat_extBS_32_t *)bpb->extended_section;
+    ext->table_size_32    = fat_size;
+    ext->extended_flags   = 0;               /* mirror both FATs */
+    ext->fat_version      = 0;
+    ext->root_cluster     = root_cluster;
+    ext->fat_info         = 1;               /* FSInfo at sector 1 */
+    ext->backup_BS_sector = 6;               /* backup at sector 6 */
+    memset(ext->reserved_0, 0, 12);
+    ext->drive_number     = 0x80;            /* hard disk */
+    ext->reserved_1       = 0;
+    ext->boot_signature   = 0x29;
+    ext->volume_id        = 0x12345678;      /* arbitrary serial */
+    memcpy(ext->volume_label,   "MYOS       ", 11);
+    memcpy(ext->fat_type_label, "FAT32   ", 8);
+
+    /* Boot signature at 510-511 */
+    vbr[510] = 0x55;
+    vbr[511] = 0xAA;
+
+    if (ata_write_sectors(partition_lba + 0, 1, vbr) < 0) {
+        log_error("[fat32] format: failed to write VBR");
+        return -1;
+    }
+
+    /* ---- FSInfo (sector 1) ---- */
+    unsigned char fsinfo[512];
+    memset(fsinfo, 0, sizeof(fsinfo));
+    fat_fsinfo_t *fsi = (fat_fsinfo_t *)fsinfo;
+    fsi->lead_sig   = 0x41615252;
+    fsi->struc_sig  = 0x61417272;
+    /* cluster 2 used for root dir, so first free = 3 */
+    unsigned int data_sectors_approx = total_sectors - reserved_sectors - (num_fats * fat_size);
+    unsigned int total_clusters = data_sectors_approx / spc;
+    fsi->free_count = total_clusters - 1;  /* minus root dir cluster */
+    fsi->nxt_free   = root_cluster + 1;    /* next free = cluster 3 */
+    fsi->trail_sig  = 0xAA550000;
+
+    if (ata_write_sectors(partition_lba + 1, 1, fsinfo) < 0) {
+        log_error("[fat32] format: failed to write FSInfo");
+        return -1;
+    }
+
+    /* ---- Backup boot sector (sector 6) and backup FSInfo (sector 7) ---- */
+    if (ata_write_sectors(partition_lba + 6, 1, vbr) < 0) {
+        log_error("[fat32] format: failed to write backup VBR");
+        return -1;
+    }
+    if (ata_write_sectors(partition_lba + 7, 1, fsinfo) < 0) {
+        log_error("[fat32] format: failed to write backup FSInfo");
+        return -1;
+    }
+
+    /* Zero sectors 2-5 and 8-31 (rest of reserved area) */
+    unsigned char zero[512];
+    memset(zero, 0, sizeof(zero));
+    for (unsigned int s = 2; s < reserved_sectors; s++) {
+        if (s == 6 || s == 7) continue;  /* already written */
+        ata_write_sectors(partition_lba + s, 1, zero);
+    }
+
+    /* ---- Write both FATs ---- */
+    /* Zero all FAT sectors first, then write entries 0, 1, 2 */
+    unsigned int fat_start[2];
+    fat_start[0] = partition_lba + reserved_sectors;
+    fat_start[1] = fat_start[0] + fat_size;
+
+    for (int f = 0; f < (int)num_fats; f++) {
+        /* Zero the entire FAT */
+        for (unsigned int s = 0; s < fat_size; s++) {
+            if (ata_write_sectors(fat_start[f] + s, 1, zero) < 0) {
+                log_error("[fat32] format: failed to zero FAT%d sector %u", f, s);
+                return -1;
+            }
+        }
+
+        /* Write first sector with entries 0, 1, 2 */
+        unsigned char fat_sec0[512];
+        memset(fat_sec0, 0, sizeof(fat_sec0));
+        unsigned int *fat_entries = (unsigned int *)fat_sec0;
+
+        /* Entry 0: media type in low byte, rest 0xFF */
+        fat_entries[0] = 0x0FFFFF00 | media_type;
+        /* Entry 1: end-of-chain mark (clean volume) */
+        fat_entries[1] = 0x0FFFFFFF;
+        /* Entry 2: root directory cluster – end-of-chain */
+        fat_entries[2] = 0x0FFFFFFF;
+
+        if (ata_write_sectors(fat_start[f], 1, fat_sec0) < 0) {
+            log_error("[fat32] format: failed to write FAT%d[0]", f);
+            return -1;
+        }
+    }
+
+    /* ---- Zero the root directory cluster (cluster 2) ---- */
+    unsigned int first_data_sector = fat_start[0] + (num_fats * fat_size);
+    unsigned int root_lba = first_data_sector + ((root_cluster - 2) * spc);
+
+    for (unsigned int s = 0; s < spc; s++) {
+        if (ata_write_sectors(root_lba + s, 1, zero) < 0) {
+            log_error("[fat32] format: failed to zero root dir sector %u", s);
+            return -1;
+        }
+    }
+
+    log_info("[fat32] format complete: FAT32 volume at LBA %u, %u clusters",
+             partition_lba, total_clusters);
+    return 0;
+}
+
 void fat32_dump_info(const fat32_context_t *ctx) {
     log_info("FAT Filesystem Info:");
     log_info("  Partition LBA      : %u", ctx->partition_lba);

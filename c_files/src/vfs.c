@@ -200,8 +200,37 @@ int fs_init(void) {
 
     /* Mount the FAT partition */
     if (fat32_init(&g_fs_ctx, partition_lba) < 0) {
-        log_error("[vfs] fat32_init failed at LBA %u", partition_lba);
-        return -1;
+        /*
+         * No valid FAT filesystem found.  If we have a disk, format it as
+         * FAT32 and retry.  This only happens on the very first boot when
+         * the raw disk image is blank.
+         */
+        unsigned int disk_sectors = ata_get_total_sectors();
+        if (disk_sectors < 2048) {  /* need at least ~1 MB */
+            log_error("[vfs] Disk too small or absent (%u sectors)", disk_sectors);
+            return -1;
+        }
+
+        /* For a partitioned disk we would format only the partition range.
+         * For super-floppy (partition_lba == 0) we format the whole disk. */
+        unsigned int vol_sectors = (partition_lba == 0)
+                                    ? disk_sectors
+                                    : disk_sectors - partition_lba;
+
+        log_info("[vfs] No filesystem found – formatting %u sectors as FAT32 ...",
+                 vol_sectors);
+
+        if (fat32_format(partition_lba, vol_sectors) < 0) {
+            log_error("[vfs] Format failed");
+            return -1;
+        }
+
+        /* Try mounting the freshly formatted volume */
+        if (fat32_init(&g_fs_ctx, partition_lba) < 0) {
+            log_error("[vfs] fat32_init failed after format");
+            return -1;
+        }
+        log_info("[vfs] Filesystem formatted and mounted successfully");
     }
 
     g_fs_mounted = 1;

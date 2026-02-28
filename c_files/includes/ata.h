@@ -80,6 +80,16 @@
 int ata_init(void);
 
 /**
+ * ata_get_total_sectors – return the LBA28 addressable sector count.
+ *
+ * The value comes from IDENTIFY words 60-61.  Only valid after a
+ * successful ata_init() call.
+ *
+ * @return Total addressable sectors (0 if ata_init() has not been called).
+ */
+unsigned int ata_get_total_sectors(void);
+
+/**
  * ata_read_sectors – read one or more 512-byte sectors into buf.
  *
  * Uses LBA28 PIO polling.  Each call to this function blocks until all

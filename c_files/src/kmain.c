@@ -32,6 +32,22 @@
 #include "process.h"
 #include "tasks.h"
 #include "interrupts.h"
+#include "vfs.h"
+#include "string.h"
+
+/* -------------------------------------------------------------------------
+ * Helpers for filesystem test
+ * ------------------------------------------------------------------------- */
+static int fs_list_cb(const vfs_dirent_t *d, void *userdata)
+{
+    (void)userdata;
+    if (d->attributes & 0x10) {  /* FAT_ATTR_DIRECTORY */
+        log_info("[fs_test]   <DIR>  %s", d->name);
+    } else {
+        log_info("[fs_test]   %u bytes  %s", d->size, d->name);
+    }
+    return 0;
+}
 
 void kmain(unsigned int eax, unsigned int ebx)
 {
@@ -70,6 +86,78 @@ void kmain(unsigned int eax, unsigned int ebx)
     pfa_run_tests();
     kheap_run_tests();
     ktest_report();
+
+    /* ------------------------------------------------------------------
+     * Filesystem smoke test – verify the VFS layer can create, write,
+     * read back, and list files on the hard-disk FAT32 partition.
+     * Run after kernel_init() has called fs_init().
+     * ------------------------------------------------------------------ */
+    {
+        fat32_context_t *fsctx = vfs_get_context();
+        if (fsctx) {
+            log_info("[fs_test] === Filesystem smoke test ===");
+
+            /* 1. List root directory (will be empty on first boot) */
+            log_info("[fs_test] Root directory before test:");
+            vfs_readdir("/", fs_list_cb, (void *)0);
+
+            /* 2. Create & write a test file */
+            int fd = vfs_open("/hello.txt", VFS_O_RDWR | VFS_O_CREAT);
+            if (fd >= 0) {
+                const char *msg = "Hello from MYOS kernel!\n";
+                int written = vfs_write(fd, msg, strlen(msg));
+                log_info("[fs_test] wrote %d bytes to /hello.txt", written);
+                vfs_close(fd);
+            } else {
+                log_error("[fs_test] failed to create /hello.txt");
+            }
+
+            /* 3. Read the file back */
+            fd = vfs_open("/hello.txt", VFS_O_RDONLY);
+            if (fd >= 0) {
+                char buf[64];
+                memset(buf, 0, sizeof(buf));
+                int nread = vfs_read(fd, buf, sizeof(buf) - 1);
+                log_info("[fs_test] read back %d bytes: \"%s\"", nread, buf);
+                vfs_close(fd);
+            }
+
+            /* 4. Create a subdirectory */
+            if (vfs_mkdir("/testdir") == 0) {
+                log_info("[fs_test] created /testdir");
+            } else {
+                log_info("[fs_test] /testdir already exists or mkdir failed");
+            }
+
+            /* 5. Create a file inside the subdirectory */
+            fd = vfs_open("/testdir/info.txt", VFS_O_RDWR | VFS_O_CREAT);
+            if (fd >= 0) {
+                const char *data = "Nested file test\n";
+                vfs_write(fd, data, strlen(data));
+                vfs_close(fd);
+                log_info("[fs_test] created /testdir/info.txt");
+            }
+
+            /* 6. List root directory after test */
+            log_info("[fs_test] Root directory after test:");
+            vfs_readdir("/", fs_list_cb, (void *)0);
+
+            /* 7. List subdirectory */
+            log_info("[fs_test] /testdir contents:");
+            vfs_readdir("/testdir", fs_list_cb, (void *)0);
+
+            /* 8. Stat the file */
+            vfs_stat_t st;
+            if (vfs_stat("/hello.txt", &st) == 0) {
+                log_info("[fs_test] stat /hello.txt: size=%u cluster=%u",
+                         st.size, st.first_cluster);
+            }
+
+            log_info("[fs_test] === Filesystem smoke test complete ===");
+        } else {
+            log_warning("[fs_test] No filesystem mounted – skipping test");
+        }
+    }
 
     /* ------------------------------------------------------------------
      * CFS Scheduler – initialise scheduler and process subsystems, then

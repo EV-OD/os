@@ -44,6 +44,17 @@ genisoimage -R \
 # -cdrom os.iso specifies the ISO image to use.
 # -m 32 sets the memory to 32MB (matching bochsrc.txt).
 # -boot d ensures it boots from the CD-ROM.
+# -hda disk.img attaches the hard disk image (FAT32 filesystem).
 # -monitor stdio allows checking registers via the terminal (type 'info registers').
-qemu-system-i386 -cdrom os.iso -m 32 -boot d -monitor stdio
+
+# Create the 64 MB raw disk image if it doesn't exist yet.
+# The kernel's fs_init() will detect the blank disk and format it as FAT32 on
+# first boot; on subsequent boots it simply mounts the existing filesystem.
+DISK_IMG="disk.img"
+if [ ! -f "$DISK_IMG" ]; then
+    echo "[runner] Creating ${DISK_IMG} (64 MB raw) ..."
+    dd if=/dev/zero of="$DISK_IMG" bs=1M count=64 status=none
+fi
+
+qemu-system-i386 -cdrom os.iso -m 32 -boot d -hda "$DISK_IMG" -monitor stdio
 

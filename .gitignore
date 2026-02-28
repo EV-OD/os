@@ -1,6 +1,7 @@
 *.o
 *.elf
 *.iso
+*.img
 *log.txt
 build/*
 

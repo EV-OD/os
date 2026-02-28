@@ -71,8 +71,18 @@ static int ata_wait_drq(void)
 }
 
 /* =========================================================================
+ * Module state
+ * ========================================================================= */
+static unsigned int g_ata_total_sectors = 0;
+
+/* =========================================================================
  * Public API
  * ========================================================================= */
+
+unsigned int ata_get_total_sectors(void)
+{
+    return g_ata_total_sectors;
+}
 
 int ata_init(void)
 {
@@ -121,7 +131,12 @@ int ata_init(void)
     }
     model[40] = '\0';
 
+    /* Words 60-61: total addressable LBA28 sectors (32-bit value) */
+    g_ata_total_sectors = ((unsigned int)identify[61] << 16) | identify[60];
+
     log_info("[ata] primary master identified: %.40s", model);
+    log_info("[ata] total LBA28 sectors: %u (%u MiB)",
+             g_ata_total_sectors, g_ata_total_sectors / 2048);
     return 0;
 }
 
