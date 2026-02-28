@@ -177,15 +177,20 @@ void mouse_init(void)
 {
     unsigned char status;
 
-    /* 1. Disable PS/2 keyboard temporarily */
+    /* 1. Register IRQ12 handler and unmask BEFORE enabling aux IRQ to
+     *    prevent "Unhandled interrupt: 44" if the mouse fires early. */
+    register_interrupt_handler(MOUSE_IRQ_VECTOR, mouse_irq_handler);
+    pic_clear_mask(MOUSE_IRQ_LINE);
+
+    /* 2. Disable PS/2 keyboard temporarily */
     ps2_wait_write();
     outb(PS2_CMD_PORT, PS2_CMD_KBD_DISABLE);
 
-    /* 2. Enable PS/2 auxiliary (mouse) port */
+    /* 3. Enable PS/2 auxiliary (mouse) port */
     ps2_wait_write();
     outb(PS2_CMD_PORT, PS2_CMD_AUX_ENABLE);
 
-    /* 3. Enable mouse interrupts via Compaq Status Byte bit 1 */
+    /* 4. Enable mouse interrupts via Compaq Status Byte bit 1 */
     ps2_wait_write();
     outb(PS2_CMD_PORT, PS2_CMD_READ_COMPAQ);
     ps2_wait_read();
@@ -197,27 +202,23 @@ void mouse_init(void)
     ps2_wait_write();
     outb(PS2_DATA_PORT, status);
 
-    /* 4. Reset mouse; read 0xAA (self-test pass) + 0x00 (device ID) */
+    /* 5. Reset mouse; read 0xAA (self-test pass) + 0x00 (device ID) */
     mouse_write(MOUSE_CMD_RESET);
     mouse_read(); /* 0xFA ack */
     mouse_read(); /* 0xAA self-test */
     mouse_read(); /* 0x00 device ID */
 
-    /* 5. Set defaults */
+    /* 6. Set defaults */
     mouse_write(MOUSE_CMD_DEFAULTS);
     mouse_read(); /* 0xFA ack */
 
-    /* 6. Enable data reporting */
+    /* 7. Enable data reporting */
     mouse_write(MOUSE_CMD_DATA_ON);
     mouse_read(); /* 0xFA ack */
 
-    /* 7. Re-enable keyboard */
+    /* 8. Re-enable keyboard */
     ps2_wait_write();
     outb(PS2_CMD_PORT, PS2_CMD_KBD_ENABLE);
-
-    /* 8. Register IRQ12 handler and unmask the line */
-    register_interrupt_handler(MOUSE_IRQ_VECTOR, mouse_irq_handler);
-    pic_clear_mask(MOUSE_IRQ_LINE);
 
     /* Centre cursor on screen */
     s_mouse.x = (int)(fb_width()  / 2);

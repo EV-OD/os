@@ -52,6 +52,7 @@ typedef struct {
  * Forward declarations
  * ------------------------------------------------------------------------- */
 
+static void gt_render_grid(gui_term_state_t *gt);  /* forward */
 static void gt_paint(wm_window_t *win);
 static void gt_put_char(char c);
 static void gt_put_char_color(char c, unsigned char vga_fg);
@@ -164,60 +165,65 @@ static void gt_emit(gui_term_state_t *gt, char c, color_t fg, color_t bg)
 
 static void gt_paint(wm_window_t *win)
 {
-    gui_term_state_t *gt = (gui_term_state_t *)win->canvas; /* NOT the canvas! */
-    (void)gt;
-    /* Actual rendering done directly into win->canvas in gt_render_grid */
+    /* Render the character grid directly into the framebuffer back-buffer
+     * so no separate canvas allocation is needed. */
+    (void)win;
+    if (s_gt) gt_render_grid(s_gt);
 }
 
-/* Render the full grid into the window's canvas. */
+/* Render the full grid directly into the framebuffer back-buffer.
+ * No separate canvas buffer is used – pixels go straight to fb via
+ * fb_put_pixel() at the window's absolute screen coordinates.        */
 static void gt_render_grid(gui_term_state_t *gt)
 {
     int row, col;
-    int cw = gt->win->w;
-    int ch = gt->win->h - TITLE_BAR_H;
+    int cw     = gt->win->w;
+    int ch     = gt->win->h - TITLE_BAR_H;
+    int base_x = gt->win->x;
+    int base_y = gt->win->y + TITLE_BAR_H;
 
-    /* Black-fill the entire canvas */
-    {
-        int total = cw * ch;
-        for (int i = 0; i < total; i++)
-            gt->win->canvas[i] = GT_BG;
-    }
+    /* Fill client area with terminal background colour */
+    for (int fy = 0; fy < ch; fy++)
+        for (int fx = 0; fx < cw; fx++)
+            fb_put_pixel(base_x + fx, base_y + fy, GT_BG);
 
     for (row = 0; row < gt->rows; row++) {
         for (col = 0; col < gt->cols; col++) {
-            char  c  = *cell_char(gt, col, row);
-            color_t fg = *cell_fg(gt, col, row);
-            color_t bg = *cell_bg(gt, col, row);
+            char    c  = *cell_char(gt, col, row);
+            color_t fg = *cell_fg (gt, col, row);
+            color_t bg = *cell_bg (gt, col, row);
             int px = col * FONT_W;
             int py = row * FONT_H;
 
-            /* Draw background cell into canvas */
+            /* Draw background cell */
             for (int dy = 0; dy < FONT_H && py + dy < ch; dy++)
                 for (int dx = 0; dx < FONT_W && px + dx < cw; dx++)
-                    gt->win->canvas[(py + dy) * cw + (px + dx)] = bg;
+                    fb_put_pixel(base_x + px + dx, base_y + py + dy, bg);
 
-            /* Draw glyph into canvas */
+            /* Draw glyph (bit 7 = leftmost pixel) */
             {
-                unsigned int idx = (unsigned char)c < 128 ? (unsigned char)c : 0;
+                unsigned int idx = (unsigned char)c < 128u ? (unsigned char)c : 0u;
                 extern char font8x8_basic[128][8];
                 for (int dy = 0; dy < FONT_H && py + dy < ch; dy++) {
                     unsigned char bits = (unsigned char)font8x8_basic[idx][dy];
                     for (int dx = 0; dx < FONT_W && px + dx < cw; dx++) {
                         if (bits & (0x80u >> dx))
-                            gt->win->canvas[(py + dy) * cw + (px + dx)] = fg;
+                            fb_put_pixel(base_x + px + dx, base_y + py + dy, fg);
                     }
                 }
             }
         }
     }
 
-    /* Cursor block (simple invert) */
+    /* Cursor: XOR-invert the character cell at the cursor position */
     {
         int px = gt->cur_col * FONT_W;
         int py = gt->cur_row * FONT_H;
         for (int dy = 0; dy < FONT_H && py + dy < ch; dy++)
-            for (int dx = 0; dx < FONT_W && px + dx < cw; dx++)
-                gt->win->canvas[(py + dy) * cw + (px + dx)] ^= 0x00FFFFFF;
+            for (int dx = 0; dx < FONT_W && px + dx < cw; dx++) {
+                color_t cur = fb_get_pixel(base_x + px + dx, base_y + py + dy);
+                fb_put_pixel(base_x + px + dx, base_y + py + dy, cur ^ 0x00FFFFFFu);
+            }
     }
 }
 

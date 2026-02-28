@@ -48,7 +48,6 @@ void wm_init(void)
 wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
 {
     wm_window_t *win;
-    unsigned int canvas_w, canvas_h, canvas_bytes;
     int i;
 
     if (wm_count >= WM_MAX_WINDOWS) {
@@ -66,16 +65,10 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
         return (void *)0;
     }
 
-    canvas_w = (unsigned int)w;
-    canvas_h = (unsigned int)(h - TITLE_BAR_H);
-    canvas_bytes = canvas_w * canvas_h * 4u;
-
-    win->canvas = (unsigned int *)kmalloc(canvas_bytes);
-    if (!win->canvas) {
-        kfree(win);
-        log_error("[wm] wm_create: kmalloc failed for canvas (%u bytes)", canvas_bytes);
-        return (void *)0;
-    }
+    /* No separate canvas buffer – gui_term renders directly to the
+     * framebuffer back-buffer.  This saves the ~3 MB allocation that
+     * a full-screen canvas would require. */
+    win->canvas = (void *)0;
 
     win->x = x; win->y = y;
     win->w = w; win->h = h;
@@ -94,10 +87,6 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     win->on_key     = (void *)0;
     win->on_mouse   = (void *)0;
     win->_stack_idx = 0;
-
-    /* Fill canvas with window background colour */
-    for (unsigned int p = 0; p < canvas_w * canvas_h; p++)
-        win->canvas[p] = COLOR_WINDOW_BG;
 
     /* Push to front of Z-stack (shift others back by one) */
     for (i = wm_count; i > 0; i--)
@@ -129,8 +118,8 @@ void wm_destroy(wm_window_t *win)
     }
     if (found < 0) return;
 
-    /* Free canvas and descriptor */
-    kfree(win->canvas);
+    /* Free canvas (only if a separate buffer was allocated) and descriptor */
+    if (win->canvas) kfree(win->canvas);
     kfree(win);
 
     /* Compact the stack */
@@ -217,8 +206,8 @@ void wm_paint(wm_window_t *win)
         gfx_draw_line(bx + 10, by + 3, bx + 3, by + 10, COLOR_WHITE);
     }
 
-    /* ---- Canvas blit ---- */
-    if (client_h > 0) {
+    /* ---- Canvas blit (only when window owns a pixel buffer) ---- */
+    if (win->canvas && client_h > 0) {
         gfx_blit(win->x, win->y + TITLE_BAR_H,
                  win->w, client_h,
                  win->canvas, win->w);
