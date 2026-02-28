@@ -244,13 +244,13 @@ int fs_init(void) {
  * ========================================================================= */
 
 int vfs_open(const char *path, int flags) {
-    if (!g_fs_mounted) return -1;
-    if (!path || path[0] != '/') return -1;
+    if (!g_fs_mounted) return VFS_ERR_IO;
+    if (!path || path[0] != '/') return VFS_ERR_GENERIC;
 
     int fd = alloc_fd();
     if (fd < 0) {
         log_error("[vfs] No free file descriptors");
-        return -1;
+        return VFS_ERR_NOFDS;
     }
 
     vfs_fd_t *f = &g_fd_table[fd];
@@ -262,7 +262,12 @@ int vfs_open(const char *path, int flags) {
     if (found == 0) {
         /* File/dir exists */
         if ((flags & VFS_O_DIRECTORY) && !(entry.attributes & FAT_ATTR_DIRECTORY)) {
-            return -1; /* wanted dir, got file */
+            return VFS_ERR_NOTDIR;
+        }
+
+        /* O_EXCL + O_CREAT: fail if already exists */
+        if ((flags & VFS_O_EXCL) && (flags & VFS_O_CREAT)) {
+            return VFS_ERR_EXIST;
         }
 
         /* VFS_O_TRUNC: zero out existing file */
@@ -287,17 +292,17 @@ int vfs_open(const char *path, int flags) {
         char name_part[256];
         if (split_path(path, parent_path, sizeof(parent_path),
                         name_part, sizeof(name_part)) < 0) {
-            return -1;
+            return VFS_ERR_GENERIC;
         }
 
         /* Resolve parent directory */
         fat_dir_entry_t parent_entry;
         if (fat32_find_path(&g_fs_ctx, parent_path, &parent_entry, (void*)0) < 0) {
             log_error("[vfs] Parent dir not found: %s", parent_path);
-            return -1;
+            return VFS_ERR_NOENT;
         }
         if (!(parent_entry.attributes & FAT_ATTR_DIRECTORY)) {
-            return -1;
+            return VFS_ERR_NOTDIR;
         }
 
         unsigned int parent_cluster = ((unsigned int)parent_entry.first_cluster_high << 16) |
@@ -314,13 +319,13 @@ int vfs_open(const char *path, int flags) {
                               FAT_ATTR_ARCHIVE,
                               &entry, &loc) < 0) {
             log_error("[vfs] Failed to create file: %s", path);
-            return -1;
+            return VFS_ERR_IO;
         }
         log_info("[vfs] Created file: %s", path);
 
     } else {
         /* Not found and O_CREAT not specified */
-        return -1;
+        return VFS_ERR_NOENT;
     }
 
     /* Fill the fd entry */
@@ -500,7 +505,17 @@ int vfs_stat(const char *path, vfs_stat_t *st) {
  * ========================================================================= */
 
 int vfs_mkdir(const char *path) {
-    if (!g_fs_mounted || !path || path[0] != '/') return -1;
+    if (!g_fs_mounted || !path || path[0] != '/') return VFS_ERR_GENERIC;
+
+    /* Check if the path already exists */
+    fat_dir_entry_t existing;
+    if (fat32_find_path(&g_fs_ctx, path, &existing, (void*)0) == 0) {
+        if (existing.attributes & FAT_ATTR_DIRECTORY) {
+            return VFS_ERR_EXIST;  /* directory already exists */
+        } else {
+            return VFS_ERR_EXIST;  /* a file with that name exists */
+        }
+    }
 
     char parent_path[256];
     char name_part[256];
@@ -512,9 +527,9 @@ int vfs_mkdir(const char *path) {
     fat_dir_entry_t parent_entry;
     if (fat32_find_path(&g_fs_ctx, parent_path, &parent_entry, (void*)0) < 0) {
         log_error("[vfs] Parent not found: %s", parent_path);
-        return -1;
+        return VFS_ERR_NOENT;
     }
-    if (!(parent_entry.attributes & FAT_ATTR_DIRECTORY)) return -1;
+    if (!(parent_entry.attributes & FAT_ATTR_DIRECTORY)) return VFS_ERR_NOTDIR;
 
     unsigned int parent_cluster = ((unsigned int)parent_entry.first_cluster_high << 16) |
                                    parent_entry.first_cluster_low;

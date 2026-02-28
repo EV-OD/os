@@ -50,7 +50,22 @@
 #define VFS_O_CREAT     0x0100   /**< Create file if it does not exist     */
 #define VFS_O_TRUNC     0x0200   /**< Truncate existing file to zero size  */
 #define VFS_O_APPEND    0x0400   /**< Writes always go to end of file      */
+#define VFS_O_EXCL      0x0800   /**< With O_CREAT: fail if file exists    */
 #define VFS_O_DIRECTORY 0x1000   /**< Fail if path is not a directory      */
+
+/* =========================================================================
+ * Error codes (returned as negative values)
+ * ========================================================================= */
+#define VFS_ERR_GENERIC     (-1)  /**< Unspecified error                    */
+#define VFS_ERR_NOENT       (-2)  /**< File or directory not found           */
+#define VFS_ERR_EXIST       (-3)  /**< File or directory already exists      */
+#define VFS_ERR_NOTDIR      (-4)  /**< Expected directory, got file          */
+#define VFS_ERR_ISDIR       (-5)  /**< Cannot perform file op on directory   */
+#define VFS_ERR_NOSPC       (-6)  /**< No space left on device              */
+#define VFS_ERR_NOFDS       (-7)  /**< File descriptor table full           */
+#define VFS_ERR_BADF        (-8)  /**< Bad file descriptor                  */
+#define VFS_ERR_IO          (-9)  /**< I/O error                            */
+#define VFS_ERR_NOACCESS   (-10)  /**< Permission / mode mismatch           */
 
 /* =========================================================================
  * Seek origin constants

@@ -911,6 +911,23 @@ int fat32_create_file(fat32_context_t *ctx,
                       fat_dir_loc_t *out_loc) {
     if (!ctx || !filename) return -1;
 
+    /* ---- Duplicate name check ----
+     * Build the 8.3 name we would write and scan the directory for a
+     * matching entry.  This prevents creating multiple entries with the
+     * same short name. */
+    unsigned char want_name[8], want_ext[3];
+    fat32_make_83name(filename, ext, want_name, want_ext);
+
+    {
+        fat_dir_entry_t existing;
+        if (fat32_find_in_dir(ctx, dir_cluster, filename, &existing, (void*)0) == 0) {
+            /* Name already exists.  If caller wants the same type
+             * (file vs dir) return it instead of creating a duplicate. */
+            if (out_entry) memcpy(out_entry, &existing, sizeof(fat_dir_entry_t));
+            return -2;  /* -2 = "already exists" */
+        }
+    }
+
     void *cluster_buf = kmalloc(ctx->bytes_per_cluster);
     if (!cluster_buf) return -1;
 

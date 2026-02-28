@@ -102,7 +102,7 @@ void kmain(unsigned int eax, unsigned int ebx)
             vfs_readdir("/", fs_list_cb, (void *)0);
 
             /* 2. Create & write a test file */
-            int fd = vfs_open("/hello.txt", VFS_O_RDWR | VFS_O_CREAT);
+            int fd = vfs_open("/hello.txt", VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
             if (fd >= 0) {
                 const char *msg = "Hello from MYOS kernel!\n";
                 int written = vfs_write(fd, msg, strlen(msg));
@@ -123,19 +123,22 @@ void kmain(unsigned int eax, unsigned int ebx)
             }
 
             /* 4. Create a subdirectory */
-            if (vfs_mkdir("/testdir") == 0) {
+            int mkret = vfs_mkdir("/testdir");
+            if (mkret == 0) {
                 log_info("[fs_test] created /testdir");
+            } else if (mkret == VFS_ERR_EXIST) {
+                log_info("[fs_test] /testdir already exists (OK)");
             } else {
-                log_info("[fs_test] /testdir already exists or mkdir failed");
+                log_error("[fs_test] failed to create /testdir (err=%d)", mkret);
             }
 
             /* 5. Create a file inside the subdirectory */
-            fd = vfs_open("/testdir/info.txt", VFS_O_RDWR | VFS_O_CREAT);
+            fd = vfs_open("/testdir/info.txt", VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
             if (fd >= 0) {
                 const char *data = "Nested file test\n";
                 vfs_write(fd, data, strlen(data));
                 vfs_close(fd);
-                log_info("[fs_test] created /testdir/info.txt");
+                log_info("[fs_test] wrote /testdir/info.txt");
             }
 
             /* 6. List root directory after test */
