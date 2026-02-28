@@ -136,11 +136,23 @@ add_custom_command(
 # Define the iso target
 add_custom_target(os_iso ALL DEPENDS os.iso)
 
+# --------------------------------------------------------------------------
+# Hard-disk image for the FAT32 filesystem.
+# Created once (64 MB raw); the kernel's fs_init() will format it on first
+# boot and reuse the existing filesystem on subsequent boots.
+# --------------------------------------------------------------------------
+set(DISK_IMG "${CMAKE_BINARY_DIR}/disk.img")
+add_custom_command(
+    OUTPUT ${DISK_IMG}
+    COMMAND ${CMAKE_COMMAND} -E env dd if=/dev/zero of=${DISK_IMG} bs=1M count=64 status=none
+    COMMENT "Creating 64 MB raw disk image"
+)
+add_custom_target(disk_img DEPENDS ${DISK_IMG})
+
 # Define the run target
 add_custom_target(run
-    # COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -monitor stdio -serial file:com1.out
-    COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -serial file:com1.out
-    DEPENDS os.iso
+    COMMAND qemu-system-i386 -cdrom os.iso -m 32 -boot d -hda ${DISK_IMG} -serial file:com1.out
+    DEPENDS os.iso disk_img
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Running kernel with QEMU"
+    COMMENT "Running kernel with QEMU (hard disk: disk.img)"
 )

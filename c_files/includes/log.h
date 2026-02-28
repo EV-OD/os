@@ -9,10 +9,23 @@
 
 
 /* Log severity levels */
+#define LOG_LEVEL_TRACE     -1
 #define LOG_LEVEL_DEBUG     0
 #define LOG_LEVEL_INFO      1
 #define LOG_LEVEL_WARNING   2
 #define LOG_LEVEL_ERROR     3
+
+/**
+ * log_trace – ultra-verbose tracing, compiled out by default.
+ *
+ * Define LOG_ENABLE_TRACE before including log.h to enable.
+ * When disabled the arguments are not evaluated at all.
+ */
+#ifdef LOG_ENABLE_TRACE
+void log_trace(char *format, ...);
+#else
+#define log_trace(...) ((void)0)
+#endif
 
 
 /** log_init:

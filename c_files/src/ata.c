@@ -11,6 +11,8 @@
 #include "stdio.h"
 #include "string.h"
 #include "log.h"
+#include "isr.h"
+#include "pic.h"
 
 /* -------------------------------------------------------------------------
  * Internal helpers
@@ -75,6 +77,19 @@ static int ata_wait_drq(void)
  * ========================================================================= */
 static unsigned int g_ata_total_sectors = 0;
 
+/**
+ * IRQ 14 handler – acknowledge and discard.  PIO mode doesn't use interrupts
+ * but the drive still asserts IRQ14 after each sector transfer.
+ */
+static void ata_irq_handler(struct cpu_state *cpu,
+                            struct stack_state *stack,
+                            unsigned int interrupt)
+{
+    (void)cpu; (void)stack; (void)interrupt;
+    /* Reading the status register clears the IRQ condition on the drive. */
+    inb(ATA_PRIMARY_STATUS);
+}
+
 /* =========================================================================
  * Public API
  * ========================================================================= */
@@ -134,9 +149,22 @@ int ata_init(void)
     /* Words 60-61: total addressable LBA28 sectors (32-bit value) */
     g_ata_total_sectors = ((unsigned int)identify[61] << 16) | identify[60];
 
-    log_info("[ata] primary master identified: %.40s", model);
+    /* Trim trailing spaces from the model string */
+    {
+        int end = 39;
+        while (end >= 0 && (model[end] == ' ' || model[end] == '\0')) end--;
+        model[end + 1] = '\0';
+    }
+
+    log_info("[ata] primary master identified: %s", model);
     log_info("[ata] total LBA28 sectors: %u (%u MiB)",
              g_ata_total_sectors, g_ata_total_sectors / 2048);
+
+    /* Register a no-op handler for IRQ 14 (primary ATA, vector 46) so that
+     * disk I/O doesn't flood the log with "Unhandled interrupt: 46".  The
+     * PIO driver uses polling; the IRQ is just acknowledged and discarded. */
+    register_interrupt_handler(46, ata_irq_handler);
+
     return 0;
 }
 

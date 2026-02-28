@@ -135,7 +135,7 @@ static void split_block(block_header_t *hptr, unsigned int size)
     hptr->size = size;
     hptr->next = new_block;
 
-    log_debug("[kheap] split: hptr=0x%x size=%u | new=0x%x size=%u",
+    log_trace("[kheap] split: hptr=0x%x size=%u | new=0x%x size=%u",
               (unsigned int)hptr, hptr->size,
               (unsigned int)new_block, new_block->size);
 }
@@ -165,7 +165,7 @@ static void coalesce(block_header_t *hptr)
         if (next->next) {
             next->next->prev = hptr;
         }
-        log_debug("[kheap] coalesce: merged next  @ 0x%x → new size=%u",
+        log_trace("[kheap] coalesce: merged next  @ 0x%x → new size=%u",
                   (unsigned int)hptr, hptr->size);
     }
 
@@ -180,7 +180,7 @@ static void coalesce(block_header_t *hptr)
         if (hptr->next) {
             hptr->next->prev = prev;
         }
-        log_debug("[kheap] coalesce: merged into prev @ 0x%x → new size=%u",
+        log_trace("[kheap] coalesce: merged into prev @ 0x%x → new size=%u",
                   (unsigned int)prev, prev->size);
     }
 }
@@ -219,7 +219,7 @@ void *kmalloc(unsigned int size)
     /* User pointer is immediately after the header. */
     data_ptr = (unsigned char *)hptr + sizeof(block_header_t);
 
-    log_debug("[kheap] kmalloc(%u) → 0x%x  [hptr=0x%x]",
+    log_trace("[kheap] kmalloc(%u) → 0x%x  [hptr=0x%x]",
               size, (unsigned int)data_ptr, (unsigned int)hptr);
 
     return (void *)data_ptr;
@@ -249,7 +249,7 @@ void kfree(void *ptr)
         return;  /* unreachable */
     }
 
-    log_debug("[kheap] kfree(0x%x)  size=%u  [hptr=0x%x]",
+    log_trace("[kheap] kfree(0x%x)  size=%u  [hptr=0x%x]",
               (unsigned int)ptr, hptr->size, (unsigned int)hptr);
 
     hptr->is_free = 1;
