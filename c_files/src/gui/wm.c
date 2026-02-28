@@ -240,18 +240,15 @@ void wm_paint(wm_window_t *win)
         gfx_draw_line(bx + 10, by + 3, bx + 3, by + 10, COLOR_WHITE);
     }
 
-    /* ---- Canvas blit or solid client-area fill ---- */
+    /* ---- Canvas blit (user windows) ---- */
     if (win->canvas && client_h > 0) {
         /* Blit the offscreen canvas into the framebuffer back-buffer. */
         gfx_blit(win->x, win->y + TITLE_BAR_H,
                  win->w, client_h,
                  win->canvas, win->w);
-    } else if (client_h > 0) {
-        /* No canvas (system terminal / gui_term): paint a solid background
-         * so the client area is never transparent after a repaint. */
-        gfx_fill_rect(win->x, win->y + TITLE_BAR_H,
-                      win->w, client_h, 0x111111);
     }
+    /* Windows with canvas == NULL (e.g. gui_term) fill their own client
+     * area via the on_paint callback called above – no fill needed here. */
 
     /* ---- Border ---- */
     gfx_draw_rect(win->x, win->y, win->w, win->h, COLOR_WINDOW_BORDER);
