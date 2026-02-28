@@ -73,6 +73,10 @@ struct wm_window {
     int _stack_idx;         /**< Position in wm_stack[]; managed by the WM.      */
     int no_drag;            /**< Non-zero: disables title-bar drag for this win.  */
     int owner_pid;          /**< PID of the process that owns this window (0=none). */
+
+    /* --- Drawing state ------------------------------------------------- */
+    unsigned int pen_color; /**< Current stroke colour (used by line/rect/circle). */
+    unsigned int bg_color;  /**< Canvas background fill colour.                   */
 };
 
 /* -------------------------------------------------------------------------
@@ -95,6 +99,18 @@ void wm_init(void);
  *               stack is full or kmalloc fails.
  */
 wm_window_t *wm_create(int x, int y, int w, int h, const char *title);
+
+/**
+ * Allocate and zero-initialise the canvas buffer for a window.
+ *
+ * Must be called after wm_create() for windows that need an offscreen
+ * pixel buffer (i.e. windows opened via SYS_GUI_OPEN).
+ * System-terminal windows skip this to avoid wasting ~3 MB of heap.
+ *
+ * The canvas is sized  win->w × (win->h - TITLE_BAR_H)  pixels (32-bpp).
+ * Returns non-zero on success, 0 if kmalloc fails.
+ */
+int wm_alloc_canvas(wm_window_t *win);
 
 /**
  * Destroy a window: free its canvas, remove it from the stack.

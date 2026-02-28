@@ -99,8 +99,14 @@ static const KwEntry KEYWORDS[] = {
     { "gui_circle", TOK_GUI_CIRCLE},
     { "gui_flush",  TOK_GUI_FLUSH },
     { "gui_close",  TOK_GUI_CLOSE },
+    { "import",          TOK_IMPORT         },
+    { "from",            TOK_FROM           },
     { "gui_wait",   TOK_GUI_WAIT  },
     { "gui_poll",   TOK_GUI_POLL  },
+    { "gui_pen",         TOK_GUI_PEN        },
+    { "gui_fill_rect",   TOK_GUI_FILL_RECT  },
+    { "gui_fill_circle", TOK_GUI_FILL_CIRCLE},
+    { "gui_fill_round",  TOK_GUI_FILL_ROUND },
     /* primitive types */
     { "i8",         TOK_TYPE_I8   },
     { "i16",        TOK_TYPE_I16  },
@@ -395,8 +401,14 @@ const char *token_type_name(TokenType t)
         case TOK_GUI_CIRCLE:  return "gui_circle";
         case TOK_GUI_FLUSH:   return "gui_flush";
         case TOK_GUI_CLOSE:   return "gui_close";
-        case TOK_GUI_WAIT:    return "gui_wait";
-        case TOK_GUI_POLL:    return "gui_poll";
+        case TOK_GUI_WAIT:         return "gui_wait";
+        case TOK_GUI_POLL:         return "gui_poll";
+        case TOK_IMPORT:           return "import";
+        case TOK_FROM:             return "from";
+        case TOK_GUI_PEN:          return "gui_pen";
+        case TOK_GUI_FILL_RECT:    return "gui_fill_rect";
+        case TOK_GUI_FILL_CIRCLE:  return "gui_fill_circle";
+        case TOK_GUI_FILL_ROUND:   return "gui_fill_round";
         case TOK_TYPE_I8:     return "i8";
         case TOK_TYPE_I16:    return "i16";
         case TOK_TYPE_I32:    return "i32";

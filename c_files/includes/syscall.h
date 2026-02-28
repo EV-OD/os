@@ -31,17 +31,21 @@
 #define SYS_SBRK     5   /* void *sbrk(int increment)  (future)            */
 #define SYS_GUI_OPEN   6
 #define SYS_GUI_CLOSE  7
-#define SYS_GUI_FILL   8
-#define SYS_GUI_TEXT   9
-#define SYS_GUI_LINE   10
-#define SYS_GUI_RECT   11
-#define SYS_GUI_CIRCLE 12
-#define SYS_GUI_FLUSH  13
-#define SYS_GUI_POLL   14
-#define SYS_GUI_WAIT   15
+#define SYS_GUI_FILL   8   /* clear canvas with colour         */
+#define SYS_GUI_TEXT   9   /* draw text onto canvas             */
+#define SYS_GUI_LINE   10  /* stroke line (uses pen_color)     */
+#define SYS_GUI_RECT   11  /* stroke rect (uses pen_color)     */
+#define SYS_GUI_CIRCLE 12  /* stroke circle                     */
+#define SYS_GUI_FLUSH  13  /* blit canvas → screen              */
+#define SYS_GUI_POLL   14  /* non-blocking key check            */
+#define SYS_GUI_WAIT   15  /* blocking key wait                 */
+#define SYS_GUI_PEN    16  /* set pen/stroke colour             */
+#define SYS_GUI_FILL_RECT   17  /* filled rectangle             */
+#define SYS_GUI_FILL_CIRCLE 18  /* filled circle                */
+#define SYS_GUI_FILL_ROUND  19  /* filled rounded rectangle     */
 
 #undef SYSCALL_MAX
-#define SYSCALL_MAX  15
+#define SYSCALL_MAX  19
 
 
 /* -------------------------------------------------------------------------

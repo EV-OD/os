@@ -272,6 +272,179 @@ static void print_prompt(void)
 }
 
 /* =========================================================================
+ * Standard library source – embedded strings written to /lib/ros/ at boot
+ * ========================================================================= */
+
+static const char LIB_GUI_ROS[] =
+    "// /lib/ros/gui.ros  --  RandomOS Standard GUI Library\n"
+    "// Usage:  import gui\n"
+    "//\n"
+    "// Color accessors\n"
+    "fn COL_BLACK()  -> i32 { return 0x000000 }\n"
+    "fn COL_WHITE()  -> i32 { return 0xFFFFFF }\n"
+    "fn COL_RED()    -> i32 { return 0xFF4040 }\n"
+    "fn COL_GREEN()  -> i32 { return 0x40CC55 }\n"
+    "fn COL_BLUE()   -> i32 { return 0x4488FF }\n"
+    "fn COL_YELLOW() -> i32 { return 0xFFDD00 }\n"
+    "fn COL_GRAY()   -> i32 { return 0x888888 }\n"
+    "fn COL_DGRAY()  -> i32 { return 0x333333 }\n"
+    "fn COL_BG()     -> i32 { return 0x0D1117 }\n"
+    "fn COL_ACCENT() -> i32 { return 0x4F8EF7 }\n"
+    "fn COL_BORDER() -> i32 { return 0x30363D }\n"
+    "// Grid layout\n"
+    "fn gcell_w(avail: i32, cols: i32, gap: i32) -> i32 {\n"
+    "    return (avail - gap * (cols + 1)) / cols\n"
+    "}\n"
+    "fn gcell_h(avail: i32, rows: i32, gap: i32) -> i32 {\n"
+    "    return (avail - gap * (rows + 1)) / rows\n"
+    "}\n"
+    "fn gcell_x(ox: i32, avail: i32, cols: i32, gap: i32, c: i32) -> i32 {\n"
+    "    let cw: i32 = gcell_w(avail, cols, gap)\n"
+    "    return ox + gap + c * (cw + gap)\n"
+    "}\n"
+    "fn gcell_y(oy: i32, avail: i32, rows: i32, gap: i32, r: i32) -> i32 {\n"
+    "    let ch: i32 = gcell_h(avail, rows, gap)\n"
+    "    return oy + gap + r * (ch + gap)\n"
+    "}\n"
+    "// Flex layout (horizontal)\n"
+    "fn flex_w(avail: i32, n: i32, gap: i32) -> i32 {\n"
+    "    return (avail - gap * (n + 1)) / n\n"
+    "}\n"
+    "fn flex_x(ox: i32, avail: i32, n: i32, gap: i32, i: i32) -> i32 {\n"
+    "    let iw: i32 = flex_w(avail, n, gap)\n"
+    "    return ox + gap + i * (iw + gap)\n"
+    "}\n"
+    "// Filled rounded rect (packs x|y and w|h for gui_fill_round syscall)\n"
+    "fn gui_rrect(win: i32, x: i32, y: i32, w: i32, h: i32, r: i32, color: i32) {\n"
+    "    let xy: i32 = x | (y << 16)\n"
+    "    let wh: i32 = w | (h << 16)\n"
+    "    gui_fill_round(win, xy, wh, r, color)\n"
+    "}\n"
+    "// Widget: filled panel\n"
+    "fn gui_panel(win: i32, x: i32, y: i32, w: i32, h: i32, color: i32) {\n"
+    "    gui_rrect(win, x, y, w, h, 8, color)\n"
+    "}\n"
+    "// Widget: header bar\n"
+    "fn gui_header(win: i32, x: i32, y: i32, w: i32, text: str) {\n"
+    "    gui_rrect(win, x, y, w, 22, 5, 0x4F8EF7)\n"
+    "    gui_text(win, x + 8, y + 7, text, 0xFFFFFF)\n"
+    "}\n"
+    "// Widget: text label\n"
+    "fn gui_label(win: i32, x: i32, y: i32, text: str, fg: i32) {\n"
+    "    gui_text(win, x, y, text, fg)\n"
+    "}\n"
+    "// Widget: button\n"
+    "fn gui_btn(win: i32, x: i32, y: i32, w: i32, h: i32, label: str) {\n"
+    "    gui_rrect(win, x, y, w, h, 6, 0x4F8EF7)\n"
+    "    gui_pen(win, 0x7ABAFF)\n"
+    "    gui_rect(win, x, y, w, h)\n"
+    "    let tx: i32 = x + (w - 40) / 2\n"
+    "    let ty: i32 = y + (h - 8) / 2\n"
+    "    gui_text(win, tx, ty, label, 0xFFFFFF)\n"
+    "}\n"
+    "// Widget: horizontal separator\n"
+    "fn gui_hsep(win: i32, x: i32, y: i32, w: i32) {\n"
+    "    gui_pen(win, 0x30363D)\n"
+    "    gui_line(win, x, y, x + w, y)\n"
+    "}\n"
+    "// Widget: progress bar\n"
+    "fn gui_progress(win: i32, x: i32, y: i32, w: i32, h: i32, val: i32, maxv: i32, color: i32) {\n"
+    "    gui_rrect(win, x, y, w, h, 3, 0x333333)\n"
+    "    let fw: i32 = w * val / maxv\n"
+    "    gui_rrect(win, x, y, fw, h, 3, color)\n"
+    "    gui_pen(win, 0x30363D)\n"
+    "    gui_rect(win, x, y, w, h)\n"
+    "}\n"
+    "// Widget: filled circle badge\n"
+    "fn gui_badge(win: i32, cx: i32, cy: i32, r: i32, color: i32) {\n"
+    "    gui_fill_circle(win, cx, cy, r, color)\n"
+    "    gui_pen(win, 0xFFFFFF)\n"
+    "    gui_circle(win, cx, cy, r, 0xFFFFFF)\n"
+    "}\n"
+    "// Widget: square icon placeholder\n"
+    "fn gui_icon(win: i32, x: i32, y: i32, size: i32, color: i32) {\n"
+    "    gui_rrect(win, x, y, size, size, 6, color)\n"
+    "}\n";
+
+static const char LIB_MATH_ROS[] =
+    "// /lib/ros/math.ros  --  RandomOS Standard Math Library\n"
+    "// Usage:  import math\n"
+    "fn abs(x: i32) -> i32 {\n"
+    "    if x < 0 { return 0 - x }\n"
+    "    return x\n"
+    "}\n"
+    "fn min(a: i32, b: i32) -> i32 {\n"
+    "    if a < b { return a }\n"
+    "    return b\n"
+    "}\n"
+    "fn max(a: i32, b: i32) -> i32 {\n"
+    "    if a > b { return a }\n"
+    "    return b\n"
+    "}\n"
+    "fn clamp(v: i32, lo: i32, hi: i32) -> i32 {\n"
+    "    if v < lo { return lo }\n"
+    "    if v > hi { return hi }\n"
+    "    return v\n"
+    "}\n"
+    "fn isqrt(n: i32) -> i32 {\n"
+    "    if n <= 0 { return 0 }\n"
+    "    let mut x: i32 = n\n"
+    "    let mut y: i32 = (x + 1) / 2\n"
+    "    while y < x {\n"
+    "        x = y\n"
+    "        y = (x + n / x) / 2\n"
+    "    }\n"
+    "    return x\n"
+    "}\n"
+    "fn ipow(base: i32, exp: i32) -> i32 {\n"
+    "    let mut r: i32 = 1\n"
+    "    let mut e: i32 = exp\n"
+    "    let mut b: i32 = base\n"
+    "    while e > 0 {\n"
+    "        if (e & 1) == 1 { r = r * b }\n"
+    "        b = b * b\n"
+    "        e = e >> 1\n"
+    "    }\n"
+    "    return r\n"
+    "}\n"
+    "fn lerp(a: i32, b: i32, t: i32, scale: i32) -> i32 {\n"
+    "    return a + (b - a) * t / scale\n"
+    "}\n"
+    "fn map_range(v: i32, in_min: i32, in_max: i32, out_min: i32, out_max: i32) -> i32 {\n"
+    "    return out_min + (v - in_min) * (out_max - out_min) / (in_max - in_min)\n"
+    "}\n";
+
+static const char LIB_IO_ROS[] =
+    "// /lib/ros/io.ros  --  RandomOS Standard I/O Library\n"
+    "// Usage:  import io\n"
+    "fn print_sep() {\n"
+    "    println(\"----------------------------------------\")\n"
+    "}\n"
+    "fn print_header(title: str) {\n"
+    "    print_sep()\n"
+    "    println(title)\n"
+    "    print_sep()\n"
+    "}\n";
+
+static void shell_init_stdlib(void)
+{
+    int fd;
+    vfs_mkdir("/lib");
+    vfs_mkdir("/lib/ros");
+
+    fd = vfs_open("/lib/ros/gui.ros",  VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd >= 0) { vfs_write(fd, LIB_GUI_ROS,  strlen(LIB_GUI_ROS));  vfs_close(fd); }
+
+    fd = vfs_open("/lib/ros/math.ros", VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd >= 0) { vfs_write(fd, LIB_MATH_ROS, strlen(LIB_MATH_ROS)); vfs_close(fd); }
+
+    fd = vfs_open("/lib/ros/io.ros",   VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd >= 0) { vfs_write(fd, LIB_IO_ROS,   strlen(LIB_IO_ROS));   vfs_close(fd); }
+
+    log_info("[shell] stdlib written to /lib/ros/");
+}
+
+/* =========================================================================
  * OS directory structure creation
  * ========================================================================= */
 void shell_init(void)
@@ -285,6 +458,8 @@ void shell_init(void)
         "/tmp",
         "/var",
         "/var/log",
+        "/lib",
+        "/lib/ros",
         (void *)0
     };
 
@@ -316,6 +491,8 @@ void shell_init(void)
         vfs_write(fd, motd, strlen(motd));
         vfs_close(fd);
     }
+
+    shell_init_stdlib();
 
     log_info("[shell] OS directory structure ready");
 }
@@ -980,42 +1157,64 @@ static const char sample_funcs[] =
     "}\n";
 
 static const char sample_gui[] =
-    "// GUI window demo\n"
+    "// GUI Library Demo\n"
     "//\n"
-    "// Opens a window, draws shapes and text, waits for 'q' to quit.\n"
+    "// Uses the standard GUI library from /lib/ros/gui.ros.\n"
+    "// The 'import gui' line inlines all helper functions\n"
+    "// (grid layout, flex layout, widgets) before compilation.\n"
     "//\n"
     "// Compile:  rosc gui.ros\n"
     "// Run:      ./gui.rox\n"
     "\n"
+    "import gui\n"
+    "\n"
     "fn main() {\n"
-    "    // Open a 320x200 window at position 80,60\n"
-    "    let win: i32 = gui_window(80, 60, 320, 200, \"RandomOS GUI\")\n"
+    "    // Open window\n"
+    "    let win: i32 = gui_window(60, 40, 380, 240, \"GUI Library Demo\")\n"
+    "    gui_fill(win, COL_BG())\n"
     "\n"
-    "    // Dark-blue background\n"
-    "    gui_fill(win, 0x001030)\n"
+    "    // Header bar + separator\n"
+    "    gui_header(win, 10, 10, 360, \"RandomOS  GUI  Demo\")\n"
+    "    gui_hsep(win, 10, 40, 360)\n"
     "\n"
-    "    // White border rectangle\n"
-    "    gui_rect(win, 10, 10, 300, 160)\n"
+    "    // Three-column grid of coloured panels\n"
+    "    let cw: i32 = gcell_w(360, 3, 8)\n"
+    "    let p0: i32 = gcell_x(10, 360, 3, 8, 0)\n"
+    "    let p1: i32 = gcell_x(10, 360, 3, 8, 1)\n"
+    "    let p2: i32 = gcell_x(10, 360, 3, 8, 2)\n"
+    "    gui_panel(win, p0, 50, cw, 58, COL_RED())\n"
+    "    gui_panel(win, p1, 50, cw, 58, COL_GREEN())\n"
+    "    gui_panel(win, p2, 50, cw, 58, COL_ACCENT())\n"
+    "    gui_label(win, p0 + 8, 76, \"Red\",   COL_WHITE())\n"
+    "    gui_label(win, p1 + 8, 76, \"Green\", COL_WHITE())\n"
+    "    gui_label(win, p2 + 8, 76, \"Blue\",  COL_WHITE())\n"
     "\n"
-    "    // Title text\n"
-    "    gui_text(win, 20, 20, \"Hello from RandomOS!\", 0xFFFFFF)\n"
-    "    gui_text(win, 20, 40, \"Press Q to quit.\",    0xCCCCCC)\n"
+    "    // Progress bar\n"
+    "    gui_label(win, 10, 122, \"Progress:\", COL_WHITE())\n"
+    "    gui_progress(win, 10, 137, 360, 14, 70, 100, COL_ACCENT())\n"
     "\n"
-    "    // A green circle\n"
-    "    gui_circle(win, 160, 110, 40, 0x00FF44)\n"
+    "    // Badge row\n"
+    "    gui_badge(win, 28,  175, 13, COL_RED())\n"
+    "    gui_badge(win, 62,  175, 13, COL_GREEN())\n"
+    "    gui_badge(win, 96,  175, 13, COL_ACCENT())\n"
+    "    gui_badge(win, 130, 175, 13, COL_YELLOW())\n"
     "\n"
-    "    // A red filled rectangle\n"
-    "    gui_rect(win, 40, 80, 80, 40)\n"
+    "    // Flex-layout buttons\n"
+    "    let bw: i32 = flex_w(360, 2, 10)\n"
+    "    gui_btn(win, flex_x(10, 360, 2, 10, 0), 158, bw, 24, \"Confirm\")\n"
+    "    gui_btn(win, flex_x(10, 360, 2, 10, 1), 158, bw, 24, \"Cancel\")\n"
     "\n"
-    "    // Push canvas to screen\n"
+    "    // Icons\n"
+    "    gui_icon(win, 160, 158, 24, COL_RED())\n"
+    "    gui_icon(win, 192, 158, 24, COL_GREEN())\n"
+    "\n"
     "    gui_flush(win)\n"
     "\n"
-    "    // Event loop: exit on 'q' (ASCII 113)\n"
+    "    // Wait for 'q' (ASCII 113) to quit\n"
     "    let mut key: i32 = 0\n"
     "    while key != 113 {\n"
     "        key = gui_wait(win)\n"
     "    }\n"
-    "\n"
     "    gui_close(win)\n"
     "}\n";
 
@@ -1033,7 +1232,7 @@ static const struct sample_entry sample_table[] = {
     { "fib",     "fib.ros",     sample_fib,     "Fibonacci sequence"      },
     { "loops",   "loops.ros",   sample_loops,   "While loops + if/else"   },
     { "funcs",   "funcs.ros",   sample_funcs,   "Functions + recursion"   },
-    { "gui",     "gui.ros",     sample_gui,     "GUI window + drawing"    },
+    { "gui",     "gui.ros",     sample_gui,     "GUI library: import, widgets, grid/flex layout" },
 };
 
 #define SAMPLE_COUNT (sizeof(sample_table) / sizeof(sample_table[0]))

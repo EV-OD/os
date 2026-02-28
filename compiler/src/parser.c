@@ -85,11 +85,13 @@ static int tok_is_type(Parser *p)
 static int tok_is_gui(Parser *p)
 {
     TokenType t = tok_peek(p)->type;
-    return (t == TOK_GUI_WINDOW || t == TOK_GUI_FILL   ||
-            t == TOK_GUI_RECT   || t == TOK_GUI_TEXT   ||
-            t == TOK_GUI_LINE   || t == TOK_GUI_CIRCLE ||
-            t == TOK_GUI_FLUSH  || t == TOK_GUI_CLOSE  ||
-            t == TOK_GUI_WAIT   || t == TOK_GUI_POLL);
+    return (t == TOK_GUI_WINDOW       || t == TOK_GUI_FILL         ||
+            t == TOK_GUI_RECT         || t == TOK_GUI_TEXT         ||
+            t == TOK_GUI_LINE         || t == TOK_GUI_CIRCLE       ||
+            t == TOK_GUI_FLUSH        || t == TOK_GUI_CLOSE        ||
+            t == TOK_GUI_WAIT         || t == TOK_GUI_POLL         ||
+            t == TOK_GUI_PEN          || t == TOK_GUI_FILL_RECT    ||
+            t == TOK_GUI_FILL_CIRCLE  || t == TOK_GUI_FILL_ROUND);
 }
 
 /* Parse and return a type name string into buf (MAX_IDENT_LEN). */
@@ -207,9 +209,13 @@ static AstNode *parse_primary(Parser *p)
             case TOK_GUI_CIRCLE: n->gui_op = 12; break;
             case TOK_GUI_FLUSH:  n->gui_op = 13; break;
             case TOK_GUI_CLOSE:  n->gui_op = 7;  break;
-            case TOK_GUI_WAIT:   n->gui_op = 15; break;
-            case TOK_GUI_POLL:   n->gui_op = 14; break;
-            default:             n->gui_op = 0;  break;
+            case TOK_GUI_WAIT:         n->gui_op = 15; break;
+            case TOK_GUI_POLL:         n->gui_op = 14; break;
+            case TOK_GUI_PEN:          n->gui_op = 16; break;
+            case TOK_GUI_FILL_RECT:    n->gui_op = 17; break;
+            case TOK_GUI_FILL_CIRCLE:  n->gui_op = 18; break;
+            case TOK_GUI_FILL_ROUND:   n->gui_op = 19; break;
+            default:                   n->gui_op = 0;  break;
         }
 
         int nc = parse_arg_list(p, n->args, MAX_ARGS);

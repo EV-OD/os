@@ -39,6 +39,10 @@ static int sys_gui_circle(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_flush(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_poll(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_gui_pen(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_gui_fill_rect(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_gui_fill_circle(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_gui_fill_round(struct cpu_state *cpu, struct stack_state *stack);
 
 /* -------------------------------------------------------------------------
  * Syscall table
@@ -62,6 +66,10 @@ static syscall_fn_t syscall_table[] = {
     [SYS_GUI_FLUSH]  = sys_gui_flush,
     [SYS_GUI_POLL]   = sys_gui_poll,
     [SYS_GUI_WAIT]   = sys_gui_wait,
+    [SYS_GUI_PEN]         = sys_gui_pen,
+    [SYS_GUI_FILL_RECT]   = sys_gui_fill_rect,
+    [SYS_GUI_FILL_CIRCLE] = sys_gui_fill_circle,
+    [SYS_GUI_FILL_ROUND]  = sys_gui_fill_round,
 };
 
 /* -------------------------------------------------------------------------
@@ -256,6 +264,7 @@ static int sys_yield(struct cpu_state *cpu, struct stack_state *stack)
 #include "gui/fb.h"
 #include "gui/color.h"
 #include "gui/font.h"
+#include "gui/canvas.h"
 
 static int sys_gui_open(struct cpu_state *cpu, struct stack_state *stack)
 {
@@ -270,6 +279,7 @@ static int sys_gui_open(struct cpu_state *cpu, struct stack_state *stack)
     if (win) {
         process_t *cur = sched_current();
         win->owner_pid = cur ? (int)cur->pid : 0;
+        wm_alloc_canvas(win);   /* allocate offscreen pixel buffer */
         wm_paint_all();
         fb_flush();
     }
@@ -295,19 +305,9 @@ static int sys_gui_fill(struct cpu_state *cpu, struct stack_state *stack)
     wm_window_t *win = (wm_window_t *)cpu->ebx;
     unsigned int col = (unsigned int)cpu->ecx;
 
-    if (!win) return -1;
-    
-    /* Fill canvas with colour directly */
-    if (win->canvas) {
-        int cw = win->w;
-        int ch = win->h - TITLE_BAR_H;
-        for (int i = 0; i < cw * ch; i++) {
-            win->canvas[i] = col;
-        }
-        win->dirty = 1;
-        wm_paint(win);
-        fb_flush_rect(win->x, win->y, win->w, win->h);
-    }
+    if (!win || !win->canvas) return -1;
+    win->bg_color = col;
+    cnv_clear(win->canvas, win->w, win->h - TITLE_BAR_H, col);
     return 0;
 }
 
@@ -315,19 +315,15 @@ static int sys_gui_text(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
     wm_window_t *win = (wm_window_t *)cpu->ebx;
-    if (!win) return -1;
-    
-    int wx = win->x;
-    int wy = win->y + TITLE_BAR_H;
-    
-    int tx = (int)cpu->ecx;
-    int ty = (int)cpu->edx;
-    const char *text = (const char *)cpu->esi;
-    unsigned int col = (unsigned int)cpu->edi;
+    if (!win || !win->canvas) return -1;
 
-    /* Draw to back buffer directly over window (quick hack) */
-    gfx_draw_text(wx + tx, wy + ty, text, col, COLOR_TRANSPARENT);
-    fb_flush_rect(wx + tx, wy + ty, 800, 16); /* conservative flush */
+    int tx             = (int)cpu->ecx;
+    int ty             = (int)cpu->edx;
+    const char *text   = (const char *)cpu->esi;
+    unsigned int col   = (unsigned int)cpu->edi;
+
+    cnv_draw_str(win->canvas, win->w, win->h - TITLE_BAR_H,
+                 tx, ty, text, col, COLOR_TRANSPARENT);
     return 0;
 }
 
@@ -335,19 +331,15 @@ static int sys_gui_line(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
     wm_window_t *win = (wm_window_t *)cpu->ebx;
-    if (!win) return -1;
-
-    int wx = win->x;
-    int wy = win->y + TITLE_BAR_H;
+    if (!win || !win->canvas) return -1;
 
     int x0 = (int)cpu->ecx;
     int y0 = (int)cpu->edx;
     int x1 = (int)cpu->esi;
     int y1 = (int)cpu->edi;
-    unsigned int col = COLOR_WHITE; /* Hardcoded for now if no color passed */
 
-    gfx_draw_line(wx + x0, wy + y0, wx + x1, wy + y1, col);
-    fb_flush_rect(wx, wy, win->w, win->h);
+    cnv_draw_line(win->canvas, win->w, win->h - TITLE_BAR_H,
+                  x0, y0, x1, y1, win->pen_color);
     return 0;
 }
 
@@ -355,19 +347,15 @@ static int sys_gui_rect(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
     wm_window_t *win = (wm_window_t *)cpu->ebx;
-    if (!win) return -1;
+    if (!win || !win->canvas) return -1;
 
-    int wx = win->x;
-    int wy = win->y + TITLE_BAR_H;
+    int rx = (int)cpu->ecx;
+    int ry = (int)cpu->edx;
+    int rw = (int)cpu->esi;
+    int rh = (int)cpu->edi;
 
-    int r_x = (int)cpu->ecx;
-    int r_y = (int)cpu->edx;
-    int r_w = (int)cpu->esi;
-    int r_h = (int)cpu->edi;
-    unsigned int col = COLOR_WHITE; 
-
-    gfx_draw_rect(wx + r_x, wy + r_y, r_w, r_h, col);
-    fb_flush_rect(wx + r_x, wy + r_y, r_w, r_h);
+    cnv_draw_rect(win->canvas, win->w, win->h - TITLE_BAR_H,
+                  rx, ry, rw, rh, win->pen_color);
     return 0;
 }
 
@@ -375,18 +363,15 @@ static int sys_gui_circle(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
     wm_window_t *win = (wm_window_t *)cpu->ebx;
-    if (!win) return -1;
-
-    int wx = win->x;
-    int wy = win->y + TITLE_BAR_H;
+    if (!win || !win->canvas) return -1;
 
     int cx = (int)cpu->ecx;
     int cy = (int)cpu->edx;
     int r  = (int)cpu->esi;
     unsigned int col = (unsigned int)cpu->edi;
-    
-    gfx_draw_circle(wx + cx, wy + cy, r, col);
-    fb_flush_rect(wx + cx - r, wy + cy - r, r*2, r*2);
+
+    cnv_draw_circle(win->canvas, win->w, win->h - TITLE_BAR_H,
+                    cx, cy, r, col);
     return 0;
 }
 
@@ -396,8 +381,8 @@ static int sys_gui_flush(struct cpu_state *cpu, struct stack_state *stack)
     wm_window_t *win = (wm_window_t *)cpu->ebx;
     if (win) {
         win->dirty = 1;
-        wm_paint_all();
-        fb_flush();
+        wm_paint(win);  /* blit canvas + title bar for this window only */
+        fb_flush_rect(win->x, win->y, win->w, win->h);
     }
     return 0;
 }
@@ -410,6 +395,77 @@ static int sys_gui_poll(struct cpu_state *cpu, struct stack_state *stack)
     if (keyboard_available()) {
         return keyboard_read_char();
     }
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * SYS_GUI_PEN (16) – set the current stroke/pen colour for a window.
+ * EBX = win, ECX = color (0x00RRGGBB)
+ * All subsequent line, rect, circle calls use this colour.
+ * ------------------------------------------------------------------------- */
+static int sys_gui_pen(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack; (void)cpu;
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
+    if (!win) return -1;
+    win->pen_color = (unsigned int)cpu->ecx;
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * SYS_GUI_FILL_RECT (17) – filled rectangle on canvas.
+ * EBX=win, ECX=x, EDX=y, ESI=w, EDI=h  (uses pen_color as fill)
+ * ------------------------------------------------------------------------- */
+static int sys_gui_fill_rect(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack; (void)cpu;
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
+    if (!win || !win->canvas) return -1;
+    int rx = (int)cpu->ecx, ry = (int)cpu->edx;
+    int rw = (int)cpu->esi, rh = (int)cpu->edi;
+    cnv_fill_rect(win->canvas, win->w, win->h - TITLE_BAR_H,
+                  rx, ry, rw, rh, win->pen_color);
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * SYS_GUI_FILL_CIRCLE (18) – filled circle on canvas.
+ * EBX=win, ECX=cx, EDX=cy, ESI=r, EDI=color
+ * ------------------------------------------------------------------------- */
+static int sys_gui_fill_circle(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack; (void)cpu;
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
+    if (!win || !win->canvas) return -1;
+    int cx = (int)cpu->ecx, cy = (int)cpu->edx;
+    int r  = (int)cpu->esi;
+    unsigned int col = (unsigned int)cpu->edi;
+    cnv_fill_circle(win->canvas, win->w, win->h - TITLE_BAR_H,
+                    cx, cy, r, col);
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * SYS_GUI_FILL_ROUND (19) – filled rounded rectangle.
+ * EBX=win, ECX=x, EDX=y, ESI=packed(w<<16|h), EDI=packed(radius<<16|color_hi)
+ * — packing needed because we only have 5 register args total.
+ * Actually: EBX=win, ECX=x|(y<<16), EDX=w|(h<<16), ESI=radius, EDI=color
+ * (x and y fit in 16 bits for any reasonable screen size)
+ * ------------------------------------------------------------------------- */
+static int sys_gui_fill_round(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack; (void)cpu;
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
+    if (!win || !win->canvas) return -1;
+    /* Unpack: ECX = x | (y << 16),  EDX = w | (h << 16) */
+    int x = (int)(cpu->ecx & 0xFFFF);
+    int y = (int)((cpu->ecx >> 16) & 0xFFFF);
+    int w = (int)(cpu->edx & 0xFFFF);
+    int h = (int)((cpu->edx >> 16) & 0xFFFF);
+    int radius = (int)cpu->esi;
+    unsigned int col = (unsigned int)cpu->edi;
+    cnv_fill_round_rect(win->canvas, win->w, win->h - TITLE_BAR_H,
+                        x, y, w, h, radius, col);
     return 0;
 }
 

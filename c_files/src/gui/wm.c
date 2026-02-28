@@ -10,6 +10,7 @@
 #include "gui/wm.h"
 #include "gui/fb.h"
 #include "gui/gfx.h"
+#include "gui/canvas.h"
 #include "gui/font.h"
 #include "gui/color.h"
 #include "kheap.h"
@@ -89,6 +90,9 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     win->on_key     = (void *)0;
     win->on_mouse   = (void *)0;
     win->_stack_idx = 0;
+    win->pen_color  = 0xFFFFFF;  /* default stroke = white */
+    win->bg_color   = 0x001020;  /* default bg = dark navy  */
+    win->owner_pid  = 0;
 
     /* Push to front of Z-stack (shift others back by one) */
     for (i = wm_count; i > 0; i--)
@@ -102,6 +106,34 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
 
     log_info("[wm] created '%s' (%dx%d at %d,%d)", win->title, w, h, x, y);
     return win;
+}
+
+/* -------------------------------------------------------------------------
+ * wm_alloc_canvas
+ * ------------------------------------------------------------------------- */
+
+int wm_alloc_canvas(wm_window_t *win)
+{
+    if (!win) return 0;
+    if (win->canvas) return 1;  /* already allocated */
+
+    int cw = win->w;
+    int ch = win->h - TITLE_BAR_H;
+    if (cw <= 0 || ch <= 0) return 0;
+
+    win->canvas = (unsigned int *)kmalloc(
+        (unsigned int)(cw * ch) * sizeof(unsigned int));
+    if (!win->canvas) {
+        log_error("[wm] wm_alloc_canvas: kmalloc failed (%dx%d)", cw, ch);
+        return 0;
+    }
+
+    /* Fill with the window's background colour. */
+    cnv_clear(win->canvas, cw, ch, win->bg_color);
+
+    log_info("[wm] canvas allocated for '%s' (%dx%d, %d bytes)",
+             win->title, cw, ch, cw * ch * 4);
+    return 1;
 }
 
 /* -------------------------------------------------------------------------
@@ -208,11 +240,17 @@ void wm_paint(wm_window_t *win)
         gfx_draw_line(bx + 10, by + 3, bx + 3, by + 10, COLOR_WHITE);
     }
 
-    /* ---- Canvas blit (only when window owns a pixel buffer) ---- */
+    /* ---- Canvas blit or solid client-area fill ---- */
     if (win->canvas && client_h > 0) {
+        /* Blit the offscreen canvas into the framebuffer back-buffer. */
         gfx_blit(win->x, win->y + TITLE_BAR_H,
                  win->w, client_h,
                  win->canvas, win->w);
+    } else if (client_h > 0) {
+        /* No canvas (system terminal / gui_term): paint a solid background
+         * so the client area is never transparent after a repaint. */
+        gfx_fill_rect(win->x, win->y + TITLE_BAR_H,
+                      win->w, client_h, 0x111111);
     }
 
     /* ---- Border ---- */

@@ -95,6 +95,8 @@ typedef enum {
     TOK_IN,           /* in                                               */
     TOK_RETURN,       /* return                                           */
     TOK_BREAK,        /* break                                            */
+    TOK_IMPORT,       /* import                                           */
+    TOK_FROM,         /* from  (import X from <path>)                     */
     TOK_CONTINUE,     /* continue                                         */
     TOK_AS,           /* as  (type cast)                                  */
     TOK_STRUCT,       /* struct                                           */
@@ -114,6 +116,10 @@ typedef enum {
     TOK_GUI_CLOSE,    /* gui_close                                        */
     TOK_GUI_WAIT,     /* gui_wait                                         */
     TOK_GUI_POLL,     /* gui_poll                                         */
+    TOK_GUI_PEN,        /* gui_pen                                          */
+    TOK_GUI_FILL_RECT,  /* gui_fill_rect                                    */
+    TOK_GUI_FILL_CIRCLE,/* gui_fill_circle                                  */
+    TOK_GUI_FILL_ROUND, /* gui_fill_round                                   */
 
     /* Types */
     TOK_TYPE_I8,      /* i8                                               */

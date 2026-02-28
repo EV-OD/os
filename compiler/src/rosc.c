@@ -17,8 +17,198 @@ static Lexer   g_lexer;
 static Parser  g_parser;
 static Codegen g_codegen;
 
-/* Source buffer – max source file size. */
+/* Source buffer – max combined (preprocessed) source length. */
 static char g_src_buf[MAX_SRC_LEN];
+
+/* -----------------------------------------------------------------------
+ * Import preprocessor
+ *
+ * Syntax supported:
+ *   import <name>                  → /lib/ros/<name>.ros
+ *   import <name> from <path>      → <path>  (absolute or relative to src)
+ *
+ * The preprocessor strips import lines and prepends the library source so
+ * the rest of the pipeline sees one unified token stream.
+ * --------------------------------------------------------------------- */
+static char   g_pp_out[MAX_SRC_LEN];        /* combined output source         */
+static char   g_pp_lib_buf[MAX_IMPORT_BUF]; /* temp: one imported file        */
+static char   g_pp_imported[MAX_IMPORTS][MAX_IMPORT_PATH]; /* dedup list      */
+static int    g_pp_import_count;
+
+static int pp_already_imported(const char *path)
+{
+    int i;
+    for (i = 0; i < g_pp_import_count; i++)
+        if (strcmp(g_pp_imported[i], path) == 0) return 1;
+    return 0;
+}
+
+static void pp_mark_imported(const char *path)
+{
+    if (g_pp_import_count < MAX_IMPORTS)
+        strncpy(g_pp_imported[g_pp_import_count++], path, MAX_IMPORT_PATH - 1);
+}
+
+/* Load file into buf, return bytes read or -1 on error. */
+static int pp_load_file(const char *path, char *buf, int buf_max)
+{
+    int fd = vfs_open(path, VFS_O_RDONLY);
+    if (fd < 0) return -1;
+    int n = vfs_read(fd, buf, buf_max - 1);
+    vfs_close(fd);
+    if (n < 0) n = 0;
+    buf[n] = '\0';
+    return n;
+}
+
+/*
+ * Resolve a relative import path against the directory of src_file.
+ * e.g. src_file="/home/test.ros", rel="./utils.ros" → "/home/utils.ros"
+ * Writes into out_path (max out_max bytes).
+ */
+static void pp_resolve_path(const char *src_file, const char *rel, char *out_path, int out_max)
+{
+    if (rel[0] == '/' || rel[0] == '\0') {
+        /* Already absolute */
+        strncpy(out_path, rel, out_max - 1);
+        out_path[out_max - 1] = '\0';
+        return;
+    }
+    /* Find directory part of src_file */
+    int len = strlen(src_file);
+    int slash = 0, i;
+    for (i = 0; i < len; i++)
+        if (src_file[i] == '/') slash = i + 1;
+    /* Copy dir prefix */
+    if (slash > 0 && slash < out_max - 1) {
+        strncpy(out_path, src_file, slash);
+        out_path[slash] = '\0';
+    } else {
+        out_path[0] = '\0';
+    }
+    /* Strip leading ./ from rel */
+    const char *r = rel;
+    if (r[0] == '.' && r[1] == '/') r += 2;
+    strncat(out_path, r, out_max - strlen(out_path) - 1);
+}
+
+/*
+ * Main preprocessing pass.
+ *
+ * - Scans src for 'import' directives at the start of a line.
+ * - Loads referenced library files and prepends them.
+ * - Strips import lines from the main source.
+ * - Returns pointer to g_pp_out containing the combined source.
+ */
+static const char *preprocess_imports(const char *src, const char *src_file)
+{
+    /* Static buffers for prepend accumulation */
+    static char prepend[MAX_SRC_LEN / 2];  /* accumulated library source */
+    int prepend_len = 0;
+    int strip_len   = 0;
+    static char stripped[MAX_SRC_LEN / 2]; /* main src with import lines removed */
+
+    g_pp_import_count = 0;
+    prepend[0] = '\0';
+    stripped[0] = '\0';
+
+    const char *p = src;
+    while (*p) {
+        /* Detect 'import ...' at the start of a line (skip leading spaces) */
+        const char *line_start = p;
+        while (*p == ' ' || *p == '\t') p++;
+
+        if (strncmp(p, "import ", 7) == 0) {
+            /* Parse: import <name> [from <path>] */
+            const char *q = p + 7;
+            while (*q == ' ') q++;
+
+            /* Read module name */
+            char name[64];
+            int ni = 0;
+            while (*q && *q != ' ' && *q != '\n' && *q != '\r' && ni < 63)
+                name[ni++] = *q++;
+            name[ni] = '\0';
+
+            /* Skip to end-of-line to consume the import directive */
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+
+            if (ni == 0) continue; /* empty import name */
+
+            /* Determine library path */
+            char lib_path[MAX_IMPORT_PATH];
+            while (*q == ' ') q++;
+            if (strncmp(q, "from ", 5) == 0) {
+                q += 5;
+                while (*q == ' ') q++;
+                int pi = 0;
+                while (*q && *q != '\n' && *q != '\r' && pi < MAX_IMPORT_PATH - 1)
+                    lib_path[pi++] = *q++;
+                lib_path[pi] = '\0';
+                /* Trim trailing whitespace */
+                while (pi > 0 && (lib_path[pi-1] == ' ' || lib_path[pi-1] == '\t'))
+                    lib_path[--pi] = '\0';
+                /* Resolve relative path */
+                char resolved[MAX_IMPORT_PATH];
+                pp_resolve_path(src_file, lib_path, resolved, MAX_IMPORT_PATH);
+                strncpy(lib_path, resolved, MAX_IMPORT_PATH - 1);
+            } else {
+                /* Standard lib: /lib/ros/<name>.ros */
+                sprintf(lib_path, "/lib/ros/%s.ros", name);
+            }
+
+            if (pp_already_imported(lib_path)) continue;
+            pp_mark_imported(lib_path);
+
+            int n = pp_load_file(lib_path, g_pp_lib_buf, MAX_IMPORT_BUF);
+            if (n > 0) {
+                if (prepend_len + n + 2 < (int)sizeof(prepend)) {
+                    memcpy(prepend + prepend_len, g_pp_lib_buf, n);
+                    prepend_len += n;
+                    prepend[prepend_len++] = '\n';
+                    prepend[prepend_len]   = '\0';
+                }
+            } else {
+                /* File not found – emit a warning comment */
+                char warn[128];
+                sprintf(warn, "// WARNING: import '%s' not found\n", lib_path);
+                int wl = strlen(warn);
+                if (strip_len + wl < (int)sizeof(stripped) - 1) {
+                    memcpy(stripped + strip_len, warn, wl);
+                    strip_len += wl;
+                    stripped[strip_len] = '\0';
+                }
+            }
+        } else {
+            /* Normal line: copy verbatim from line_start to end-of-line */
+            p = line_start;
+            while (*p && *p != '\n') {
+                if (strip_len < (int)sizeof(stripped) - 2)
+                    stripped[strip_len++] = *p;
+                p++;
+            }
+            if (*p == '\n') {
+                if (strip_len < (int)sizeof(stripped) - 1)
+                    stripped[strip_len++] = '\n';
+                p++;
+            }
+            stripped[strip_len] = '\0';
+        }
+    }
+
+    /* Combine: prepend + stripped */
+    int total = prepend_len + strip_len;
+    if (total >= MAX_SRC_LEN - 1) total = MAX_SRC_LEN - 2;
+    memcpy(g_pp_out, prepend, prepend_len);
+    memcpy(g_pp_out + prepend_len, stripped, strip_len);
+    g_pp_out[prepend_len + strip_len] = '\0';
+
+    if (prepend_len > 0)
+        log_info("[rosc] preprocessor: merged %d bytes of library source", prepend_len);
+
+    return g_pp_out;
+}
 
 /* -----------------------------------------------------------------------
  * Helper: derive .rox output path from .ros source path
@@ -106,9 +296,12 @@ int rosc_compile(const char *src_path, const char *out_path, int force)
     }
     g_src_buf[n] = '\0';
 
+    /* --- Stage 0: Preprocess imports ---------------------------------- */
+    const char *pp_src = preprocess_imports(g_src_buf, src_path);
+
     /* --- Stage 1: Lex -------------------------------------------------- */
     error_init();
-    lexer_init(&g_lexer, g_src_buf);
+    lexer_init(&g_lexer, pp_src);
 
     if (lexer_tokenize(&g_lexer) != 0 || error_count() > 0) {
         puts_color("[FAIL] ", COLOR_LIGHT_RED);
