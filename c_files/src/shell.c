@@ -87,7 +87,7 @@ static const builtin_cmd_t builtins[] = {
     { "uname",  "Print system information",         cmd_uname  },
     { "whoami", "Print current user",               cmd_whoami },
     { "rosc",   "Compile .ros source to .rox",      cmd_rosc   },
-    { "sample", "Create sample .ros source file",   cmd_sample },
+    { "sample", "Create sample .ros program (try: sample list)", cmd_sample },
     { (void *)0, (void *)0, (void *)0 } /* sentinel */
 };
 
@@ -770,13 +770,157 @@ static int cmd_rosc(int argc, char **argv)
 }
 
 /* --- sample ------------------------------------------------------------ */
+
+/* Sample program templates */
+static const char sample_hello[] =
+    "// Hello from RandomOS!\n"
+    "//\n"
+    "// Compile:  rosc hello.ros\n"
+    "// Run:      ./hello.rox\n"
+    "\n"
+    "print(\"Hello, RandomOS!\\n\")\n"
+    "\n"
+    "let x: i32 = 42\n"
+    "let y: i32 = x * 2 + 8\n"
+    "let answer: i32 = (x + y) / 2\n"
+    "\n"
+    "print(\"The answer is: \")\n"
+    "print(answer)\n";
+
+static const char sample_strings[] =
+    "// String printing demo\n"
+    "//\n"
+    "// Compile:  rosc strings.ros\n"
+    "// Run:      ./strings.rox\n"
+    "\n"
+    "print(\"=== RandomOS String Demo ===\\n\")\n"
+    "print(\"\\n\")\n"
+    "print(\"Welcome to RandomOS!\\n\")\n"
+    "print(\"This program prints strings.\\n\")\n"
+    "print(\"\\n\")\n"
+    "print(\"Tab stops:\\n\")\n"
+    "print(\"\\tFirst\\n\")\n"
+    "print(\"\\t\\tSecond\\n\")\n"
+    "print(\"\\t\\t\\tThird\\n\")\n"
+    "print(\"\\n\")\n"
+    "print(\"Multi-line:\\n\")\n"
+    "print(\"Line 1\\nLine 2\\nLine 3\\n\")\n"
+    "print(\"\\n\")\n"
+    "print(\"Goodbye!\\n\")\n";
+
+static const char sample_math[] =
+    "// Math operations demo\n"
+    "//\n"
+    "// Compile:  rosc math.ros\n"
+    "// Run:      ./math.rox\n"
+    "\n"
+    "print(\"=== Math Demo ===\\n\")\n"
+    "\n"
+    "let a: i32 = 100\n"
+    "let b: i32 = 37\n"
+    "\n"
+    "let sum: i32 = a + b\n"
+    "let diff: i32 = a - b\n"
+    "let prod: i32 = a * b\n"
+    "let quot: i32 = a / b\n"
+    "\n"
+    "print(\"100 + 37 = \")\n"
+    "print(sum)\n"
+    "print(\"100 - 37 = \")\n"
+    "print(diff)\n"
+    "print(\"100 * 37 = \")\n"
+    "print(prod)\n"
+    "print(\"100 / 37 = \")\n"
+    "print(quot)\n"
+    "\n"
+    "let nested: i32 = (a + b) * (a - b) / 10\n"
+    "print(\"(100+37)*(100-37)/10 = \")\n"
+    "print(nested)\n";
+
+static const char sample_fib[] =
+    "// Fibonacci sequence (compile-time)\n"
+    "//\n"
+    "// Compile:  rosc fib.ros\n"
+    "// Run:      ./fib.rox\n"
+    "\n"
+    "print(\"=== Fibonacci ===\\n\")\n"
+    "\n"
+    "let f0: i32 = 0\n"
+    "let f1: i32 = 1\n"
+    "let f2: i32 = f0 + f1\n"
+    "let f3: i32 = f1 + f2\n"
+    "let f4: i32 = f2 + f3\n"
+    "let f5: i32 = f3 + f4\n"
+    "let f6: i32 = f4 + f5\n"
+    "let f7: i32 = f5 + f6\n"
+    "let f8: i32 = f6 + f7\n"
+    "let f9: i32 = f7 + f8\n"
+    "let f10: i32 = f8 + f9\n"
+    "\n"
+    "print(f0)\n"
+    "print(f1)\n"
+    "print(f2)\n"
+    "print(f3)\n"
+    "print(f4)\n"
+    "print(f5)\n"
+    "print(f6)\n"
+    "print(f7)\n"
+    "print(f8)\n"
+    "print(f9)\n"
+    "print(f10)\n";
+
+struct sample_entry {
+    const char *name;
+    const char *file;
+    const char *src;
+    const char *desc;
+};
+
+static const struct sample_entry sample_table[] = {
+    { "hello",   "hello.ros",   sample_hello,   "Hello + variables"    },
+    { "strings", "strings.ros", sample_strings, "String printing"      },
+    { "math",    "math.ros",    sample_math,    "Math operations"      },
+    { "fib",     "fib.ros",     sample_fib,     "Fibonacci sequence"   },
+};
+
+#define SAMPLE_COUNT (sizeof(sample_table) / sizeof(sample_table[0]))
+
 static int cmd_sample(int argc, char **argv)
 {
-    const char *filename = "hello.ros";
-    if (argc >= 2) filename = argv[1];
+    /* No arguments or "list" → show available templates */
+    if (argc < 2 || strcmp(argv[1], "list") == 0) {
+        puts_color("Available sample programs:\n", COLOR_WHITE);
+        unsigned int i;
+        for (i = 0; i < SAMPLE_COUNT; i++) {
+            puts_color("  sample ", COLOR_DARK_GREY);
+            puts_color(sample_table[i].name, COLOR_LIGHT_GREEN);
+            puts_color("  - ", COLOR_DARK_GREY);
+            puts((char *)sample_table[i].desc);
+            putchar('\n');
+        }
+        puts_color("\nUsage: sample <name>\n", COLOR_DARK_GREY);
+        return 0;
+    }
+
+    /* Find the matching template */
+    const struct sample_entry *entry = (const struct sample_entry *)0;
+    unsigned int i;
+    for (i = 0; i < SAMPLE_COUNT; i++) {
+        if (strcmp(argv[1], sample_table[i].name) == 0) {
+            entry = &sample_table[i];
+            break;
+        }
+    }
+
+    if (!entry) {
+        puts_color("sample: unknown template '", COLOR_LIGHT_RED);
+        puts(argv[1]);
+        puts("'. Use 'sample list' to see available templates.\n");
+        return -1;
+    }
 
     char path[256];
-    resolve_path(filename, path, sizeof(path));
+    resolve_path(entry->file, path, sizeof(path));
 
     /* Check if file already exists */
     vfs_stat_t st;
@@ -795,22 +939,7 @@ static int cmd_sample(int argc, char **argv)
         return -1;
     }
 
-    static const char sample_src[] =
-        "// Hello from RandomOS!\n"
-        "// This is a sample .ros program.\n"
-        "//\n"
-        "// Compile with:  rosc hello.ros\n"
-        "// Run with:      ./hello.rox\n"
-        "\n"
-        "print(\"Hello, RandomOS!\\n\")\n"
-        "\n"
-        "let x: i32 = 42\n"
-        "let y: i32 = x * 2 + 8\n"
-        "let answer: i32 = (x + y) / 2\n"
-        "\n"
-        "print(answer)\n";
-
-    vfs_write(fd, sample_src, strlen(sample_src));
+    vfs_write(fd, entry->src, strlen(entry->src));
     vfs_close(fd);
 
     puts_color("  created: ", COLOR_LIGHT_GREEN);

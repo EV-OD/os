@@ -129,6 +129,22 @@ int putchar(char c)
     if (c == '\n') {
         cursor_move_newline();
         fb_check_scroll();
+    } else if (c == '\t') {
+        /* Advance to next 8-column tab stop */
+        unsigned short col = (cursor_pos / 2) % FB_COLUMNS;
+        unsigned short next_tab = (col + 8) & ~7u;
+        if (next_tab > FB_COLUMNS) next_tab = FB_COLUMNS;
+        while (col < next_tab) {
+            fb_write_cell(cursor_pos, ' ', COLOR_BLACK, COLOR_WHITE);
+            cursor_move_forward();
+            col++;
+        }
+        fb_check_scroll();
+    } else if (c == '\r') {
+        /* Carriage return – move to start of current row */
+        unsigned short row = (cursor_pos / 2) / FB_COLUMNS;
+        cursor_pos = row * FB_COLUMNS * 2;
+        fb_move_cursor(cursor_pos / 2);
     } else {
         fb_write_cell(cursor_pos, c, COLOR_BLACK, COLOR_WHITE);
         cursor_move_forward();
@@ -405,8 +421,21 @@ void putchar_color(char c, unsigned char fg)
     if (c == '\n') {
         cursor_move_newline();
         fb_check_scroll();
+    } else if (c == '\t') {
+        unsigned short col = (cursor_pos / 2) % FB_COLUMNS;
+        unsigned short next_tab = (col + 8) & ~7u;
+        if (next_tab > FB_COLUMNS) next_tab = FB_COLUMNS;
+        while (col < next_tab) {
+            fb_write_cell(cursor_pos, ' ', COLOR_BLACK, fg);
+            cursor_move_forward();
+            col++;
+        }
+        fb_check_scroll();
+    } else if (c == '\r') {
+        unsigned short row = (cursor_pos / 2) / FB_COLUMNS;
+        cursor_pos = row * FB_COLUMNS * 2;
+        fb_move_cursor(cursor_pos / 2);
     } else {
-        /* 3rd param = background (high nibble), 4th = foreground (low nibble) */
         fb_write_cell(cursor_pos, c, COLOR_BLACK, fg);
         cursor_move_forward();
         fb_check_scroll();

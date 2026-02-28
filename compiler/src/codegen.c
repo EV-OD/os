@@ -168,32 +168,6 @@ static int eval_expr(Codegen *cg, AstNode *node, i32 *out)
 }
 
 /* -----------------------------------------------------------------------
- * Build an embedded string for a binding: "name = value\n"
- * --------------------------------------------------------------------- */
-static void add_binding_string(Codegen *cg, const char *name, i32 val)
-{
-    if (cg->string_count >= MAX_BINDINGS) return;
-
-    CodegenString *s = &cg->strings[cg->string_count];
-    char vbuf[16];
-    int  vlen = i32_to_str(val, vbuf, sizeof(vbuf));
-    int  nlen = strlen(name);
-    int  pos  = 0;
-
-    /* "name = value\n" */
-    if (nlen > 60) nlen = 60; /* safety */
-    memcpy(s->str + pos, name, nlen); pos += nlen;
-    s->str[pos++] = ' ';
-    s->str[pos++] = '=';
-    s->str[pos++] = ' ';
-    memcpy(s->str + pos, vbuf, vlen); pos += vlen;
-    s->str[pos++] = '\n';
-    s->str[pos]   = '\0';
-    s->len = pos;
-    cg->string_count++;
-}
-
-/* -----------------------------------------------------------------------
  * Add a raw string to the data section (used by print()).
  * --------------------------------------------------------------------- */
 static void add_raw_string(Codegen *cg, const char *str, int len)
@@ -232,15 +206,12 @@ int codegen_run(Codegen *cg, AstNode *prog)
             i32 val;
             if (eval_expr(cg, stmt->expr, &val) != 0) return -1;
 
-            /* Record in the binding table */
+            /* Record in the binding table (no output – only print() prints). */
             if (cg->bind_count < MAX_BINDINGS) {
                 strncpy(cg->bind_name[cg->bind_count], stmt->name, MAX_IDENT_LEN - 1);
                 cg->bind_val[cg->bind_count] = val;
                 cg->bind_count++;
             }
-
-            /* Build embedded string */
-            add_binding_string(cg, stmt->name, val);
 
         } else if (stmt->type == AST_PRINT) {
             if (stmt->expr && stmt->expr->type == AST_STRING) {
