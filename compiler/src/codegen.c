@@ -441,20 +441,39 @@ int codegen_run(Codegen *cg, AstNode *prog) {
         }
     }
 
-    /* 4. Main block */
+    /* 4. Entry stub */
     resolve_fwd(cg, jmp_main);
-    cg->entry_offset = cg->code_len; // true entry
-    
-    emit8(cg, 0x55); /* push ebp */
+    cg->entry_offset = cg->code_len; /* true entry */
+
+    emit8(cg, 0x55);               /* push ebp */
     emit8(cg, 0x89); emit8(cg, 0xE5); /* mov ebp, esp */
-    emit8(cg, 0x81); emit8(cg, 0xEC); 
+    emit8(cg, 0x81); emit8(cg, 0xEC);
     int main_frame_patch = cg->code_len; emit32(cg, 0);
 
     cg->local_count = 0; cg->next_slot = 1;
 
-    for (int i=0; i<prog->stmt_count; i++) {
-        AstNode *n = prog->stmts[i];
-        if (n->type != AST_FUNC_DEF) emit_stmt(cg, n);
+    /* If there is a fn main(), call it; otherwise run top-level stmts */
+    int main_idx = -1;
+    for (int k = 0; k < cg->func_count; k++) {
+        if (strcmp(cg->funcs[k].name, "main") == 0) { main_idx = k; break; }
+    }
+
+    if (main_idx >= 0) {
+        /* call main  (E8 rel32 – patched by FIX_REL_FUNC fixup) */
+        emit8(cg, 0xE8);
+        if (cg->fixup_count < MAX_FIXUPS) {
+            Fixup *fx = &cg->fixups[cg->fixup_count++];
+            fx->kind = FIX_REL_FUNC;
+            fx->patch_pos = cg->code_len;
+            fx->idx = main_idx;
+        }
+        emit32(cg, 0); /* placeholder, filled by fixup pass */
+    } else {
+        /* no fn main – emit bare top-level statements */
+        for (int i = 0; i < prog->stmt_count; i++) {
+            AstNode *n = prog->stmts[i];
+            if (n->type != AST_FUNC_DEF) emit_stmt(cg, n);
+        }
     }
     patch32(cg, main_frame_patch, cg->next_slot * 4);
 

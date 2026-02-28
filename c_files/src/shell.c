@@ -772,23 +772,35 @@ static int cmd_whoami(int argc, char **argv)
 static int cmd_rosc(int argc, char **argv)
 {
     if (argc < 2) {
-        puts("Usage: rosc <input.ros> [output.rox]\n");
+        puts("Usage: rosc [-f] <input.ros> [output.rox]\n");
+        puts("  -f  overwrite existing output file\n");
         puts("  Compile a .ros source file into a .rox executable.\n");
         return -1;
     }
 
-    char src_path[256];
-    resolve_path(argv[1], src_path, sizeof(src_path));
+    int  force = 0;
+    int  arg_start = 1;
+    if (strcmp(argv[1], "-f") == 0) {
+        force = 1;
+        arg_start = 2;
+        if (argc < 3) {
+            puts("Usage: rosc -f <input.ros> [output.rox]\n");
+            return -1;
+        }
+    }
 
-    const char *out = (argc >= 3) ? argv[2] : (const char *)0;
+    char src_path[256];
+    resolve_path(argv[arg_start], src_path, sizeof(src_path));
+
+    const char *out = (argc > arg_start + 1) ? argv[arg_start + 1] : (const char *)0;
     char out_path[256];
 
     if (out) {
         resolve_path(out, out_path, sizeof(out_path));
-        return rosc_compile(src_path, out_path);
+        return rosc_compile(src_path, out_path, force);
     }
 
-    return rosc_compile(src_path, (const char *)0);
+    return rosc_compile(src_path, (const char *)0, force);
 }
 
 /* --- sample ------------------------------------------------------------ */

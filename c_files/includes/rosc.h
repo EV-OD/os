@@ -18,9 +18,10 @@
  * @param out_path   VFS path for the .rox output file (e.g. "/home/test.rox").
  *                   If NULL, the output path is derived from src_path by
  *                   replacing the .ros extension with .rox.
+ * @param force      If non-zero, overwrite an existing output file.
  * @return           0 on success, negative on error.
  */
-int rosc_compile(const char *src_path, const char *out_path);
+int rosc_compile(const char *src_path, const char *out_path, int force);
 
 /**
  * rosc_run – interactive demo: compile and display the hardcoded test program.

@@ -69,7 +69,7 @@ static void extract_prog_name(const char *path, char *name, int name_size)
 /* -----------------------------------------------------------------------
  * rosc_compile – compile a .ros source file to a .rox executable.
  * --------------------------------------------------------------------- */
-int rosc_compile(const char *src_path, const char *out_path)
+int rosc_compile(const char *src_path, const char *out_path, int force)
 {
     char output_path[256];
     char prog_name[12];
@@ -151,6 +151,19 @@ int rosc_compile(const char *src_path, const char *out_path)
     hdr.name[11] = '\0';
 
     /* --- Write .rox file ----------------------------------------------- */
+    /* Refuse to silently overwrite an existing .rox */
+    if (!force) {
+        vfs_stat_t _st;
+        if (vfs_stat(output_path, &_st) == 0) {
+            puts_color("rosc: output file already exists: ", COLOR_LIGHT_BROWN);
+            puts(output_path);
+            puts("\n  use 'rosc -f " );
+            puts(output_path);
+            puts("' to force overwrite\n");
+            return -5;
+        }
+    }
+
     fd = vfs_open(output_path, VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
     if (fd < 0) {
         puts_color("rosc: ", COLOR_LIGHT_RED);
