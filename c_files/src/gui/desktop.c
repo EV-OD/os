@@ -195,6 +195,10 @@ void desktop_run(void)
                     /* Button press can move a window → need bg redraw */
                     bg_dirty = 1;
                 }
+                if (lbtn && (ms.x != prev_ms.x || ms.y != prev_ms.y)) {
+                    /* Mouse moving with button held = possible drag → repaint bg */
+                    bg_dirty = 1;
+                }
                 if (!lbtn && prev_lbtn) {
                     int tb_y = (int)fb_height() - TASKBAR_H;
                     if (ms.y < tb_y)
