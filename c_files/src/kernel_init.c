@@ -32,6 +32,7 @@
 #include "tss.h"
 #include "pit.h"
 #include "log.h"
+#include "vfs.h"
 
 /*
  * Linker-script boundary symbols for the kernel image.
@@ -78,6 +79,17 @@ void kernel_init(unsigned int mb_magic, multiboot_info_t *mb)
      * no additional page tables are needed at this stage.
      */
     kheap_init();
+
+    /*
+     * Initialise the virtual filesystem (ATA + FAT32).
+     * Must come after kheap_init() (uses kmalloc internally).
+     * Probes the primary ATA drive, locates the FAT partition in the MBR,
+     * and mounts it.  If no drive or no FAT partition is found the system
+     * continues without a mounted filesystem.
+     */
+    if (fs_init() < 0) {
+        log_warning("[kernel_init] Filesystem not available");
+    }
 
     /*
      * Install the TSS descriptor into GDT[5] and load the Task Register.

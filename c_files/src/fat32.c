@@ -558,6 +558,8 @@ unsigned int fat32_alloc_cluster(fat32_context_t *ctx) {
             void *zero_buf = kmalloc(ctx->bytes_per_cluster);
             if (zero_buf) {
                 memset(zero_buf, 0, ctx->bytes_per_cluster);
+                fat32_write_cluster(ctx, i, zero_buf);
+                kfree(zero_buf);
             }
             return i;
         }
@@ -567,6 +569,7 @@ unsigned int fat32_alloc_cluster(fat32_context_t *ctx) {
 }
 
 int fat32_update_dir_entry(fat32_context_t *ctx, const fat_dir_loc_t *loc, const fat_dir_entry_t *entry) {
+    (void)ctx;
     if (!loc || loc->sector == 0) return -1;
     
     unsigned char sector_buf[512]; // Assume 512 byte sectors
@@ -577,4 +580,306 @@ int fat32_update_dir_entry(fat32_context_t *ctx, const fat_dir_loc_t *loc, const
     memcpy(&sector_buf[loc->offset], entry, sizeof(fat_dir_entry_t));
     
     return ata_write_sectors(loc->sector, 1, sector_buf);
+}
+
+/* =========================================================================
+ * fat32_write_file – write data to an existing file
+ *
+ * Walks the cluster chain to find the cluster containing 'offset', then
+ * writes data cluster-by-cluster, allocating new clusters as needed.
+ * Updates the directory entry's file_size on disk.
+ * ========================================================================= */
+
+int fat32_write_file(fat32_context_t *ctx,
+                     fat_dir_entry_t *entry,
+                     const fat_dir_loc_t *loc,
+                     unsigned int offset,
+                     const void *data,
+                     unsigned int size) {
+    if (!ctx || !entry || !loc || !data || size == 0) return -1;
+    if (entry->attributes & FAT_ATTR_DIRECTORY) return -1;
+
+    unsigned int first_cluster = ((unsigned int)entry->first_cluster_high << 16) |
+                                  entry->first_cluster_low;
+    const char *src = (const char *)data;
+    unsigned int bytes_written = 0;
+
+    /* If the file has no cluster yet, allocate one */
+    if (first_cluster < 2) {
+        first_cluster = fat32_alloc_cluster(ctx);
+        if (first_cluster == 0) return -1; /* disk full */
+        entry->first_cluster_low  = first_cluster & 0xFFFF;
+        entry->first_cluster_high = (first_cluster >> 16) & 0xFFFF;
+    }
+
+    void *cluster_buf = kmalloc(ctx->bytes_per_cluster);
+    if (!cluster_buf) return -1;
+
+    unsigned int cur_cluster = first_cluster;
+    unsigned int cluster_index = 0;
+    unsigned int start_cluster_idx = offset / ctx->bytes_per_cluster;
+
+    /* Walk to the cluster containing 'offset' */
+    while (cluster_index < start_cluster_idx) {
+        unsigned int next = fat32_next_cluster(ctx, cur_cluster);
+        if (next >= FAT32_EOC_MIN || next == 0 || next == FAT32_BAD) {
+            /* Need to extend chain */
+            unsigned int new_clust = fat32_alloc_cluster(ctx);
+            if (new_clust == 0) { kfree(cluster_buf); return -1; }
+            fat32_set_fat_entry(ctx, cur_cluster, new_clust);
+            cur_cluster = new_clust;
+        } else {
+            cur_cluster = next;
+        }
+        cluster_index++;
+    }
+
+    unsigned int off_in_cluster = offset % ctx->bytes_per_cluster;
+
+    /* Write loop */
+    while (bytes_written < size) {
+        /* Read current cluster contents (for partial overwrites) */
+        if (fat32_read_cluster(ctx, cur_cluster, cluster_buf) < 0) {
+            kfree(cluster_buf);
+            return -1;
+        }
+
+        unsigned int space = ctx->bytes_per_cluster - off_in_cluster;
+        unsigned int to_write = size - bytes_written;
+        if (to_write > space) to_write = space;
+
+        memcpy((char *)cluster_buf + off_in_cluster, src + bytes_written, to_write);
+
+        if (fat32_write_cluster(ctx, cur_cluster, cluster_buf) < 0) {
+            kfree(cluster_buf);
+            return -1;
+        }
+
+        bytes_written += to_write;
+        off_in_cluster = 0; /* subsequent clusters start at byte 0 */
+
+        if (bytes_written < size) {
+            unsigned int next = fat32_next_cluster(ctx, cur_cluster);
+            if (next >= FAT32_EOC_MIN || next == 0 || next == FAT32_BAD) {
+                unsigned int new_clust = fat32_alloc_cluster(ctx);
+                if (new_clust == 0) { kfree(cluster_buf); return bytes_written; }
+                fat32_set_fat_entry(ctx, cur_cluster, new_clust);
+                cur_cluster = new_clust;
+            } else {
+                cur_cluster = next;
+            }
+        }
+    }
+
+    kfree(cluster_buf);
+
+    /* Update file size if we extended past the old end */
+    unsigned int new_end = offset + bytes_written;
+    if (new_end > entry->file_size) {
+        entry->file_size = new_end;
+    }
+
+    /* Write back the directory entry with updated size and cluster pointers */
+    fat32_update_dir_entry(ctx, loc, entry);
+
+    return bytes_written;
+}
+
+/* =========================================================================
+ * fat32_create_file – create a new 8.3 entry in a directory
+ *
+ * Scans every cluster in the directory chain for the first free slot
+ * (first byte 0x00 or 0xE5).  If none found, extends the directory by
+ * allocating a new cluster.  Writes the new entry to disk.
+ * ========================================================================= */
+
+/* Internal: make an 8.3 name from separate name/ext strings */
+static void fat32_make_83name(const char *name, const char *ext,
+                              unsigned char out_name[8], unsigned char out_ext[3]) {
+    int i;
+    for (i = 0; i < 8; i++) {
+        if (name && name[i] && name[i] != '.') {
+            out_name[i] = (name[i] >= 'a' && name[i] <= 'z')
+                         ? name[i] - 32 : name[i];
+        } else {
+            out_name[i] = ' ';
+        }
+    }
+    for (i = 0; i < 3; i++) {
+        if (ext && ext[i]) {
+            out_ext[i] = (ext[i] >= 'a' && ext[i] <= 'z')
+                        ? ext[i] - 32 : ext[i];
+        } else {
+            out_ext[i] = ' ';
+        }
+    }
+}
+
+int fat32_create_file(fat32_context_t *ctx,
+                      unsigned int dir_cluster,
+                      const char *filename,
+                      const char *ext,
+                      unsigned char attributes,
+                      fat_dir_entry_t *out_entry,
+                      fat_dir_loc_t *out_loc) {
+    if (!ctx || !filename) return -1;
+
+    void *cluster_buf = kmalloc(ctx->bytes_per_cluster);
+    if (!cluster_buf) return -1;
+
+    unsigned int cur_cluster = dir_cluster;
+    unsigned int prev_cluster = 0;
+
+    /* Walk through each cluster of the directory looking for a free entry */
+    while (1) {
+        if (fat32_read_cluster(ctx, cur_cluster, cluster_buf) < 0) {
+            kfree(cluster_buf);
+            return -1;
+        }
+
+        fat_dir_entry_t *entries = (fat_dir_entry_t *)cluster_buf;
+        unsigned int count = ctx->bytes_per_cluster / sizeof(fat_dir_entry_t);
+        unsigned int lba = fat32_cluster_to_lba(ctx, cur_cluster);
+
+        for (unsigned int i = 0; i < count; i++) {
+            unsigned char first = entries[i].name[0];
+            if (first == 0x00 || first == 0xE5) {
+                /* Found a free slot – fill it */
+                memset(&entries[i], 0, sizeof(fat_dir_entry_t));
+                fat32_make_83name(filename, ext, entries[i].name, entries[i].ext);
+                entries[i].attributes = attributes;
+                entries[i].file_size = 0;
+                entries[i].first_cluster_high = 0;
+                entries[i].first_cluster_low = 0;
+
+                /* Write cluster back */
+                if (fat32_write_cluster(ctx, cur_cluster, cluster_buf) < 0) {
+                    kfree(cluster_buf);
+                    return -1;
+                }
+
+                if (out_entry) memcpy(out_entry, &entries[i], sizeof(fat_dir_entry_t));
+                if (out_loc) {
+                    out_loc->cluster = cur_cluster;
+                    out_loc->sector = lba + ((i * sizeof(fat_dir_entry_t)) / ctx->bytes_per_sector);
+                    out_loc->offset = (i * sizeof(fat_dir_entry_t)) % ctx->bytes_per_sector;
+                }
+
+                kfree(cluster_buf);
+                return 0;
+            }
+        }
+
+        /* No free slot in this cluster – follow chain */
+        prev_cluster = cur_cluster;
+        unsigned int next = fat32_next_cluster(ctx, cur_cluster);
+        if (next >= FAT32_EOC_MIN || next == 0 || next == FAT32_BAD) {
+            /* Extend directory by allocating a new cluster */
+            unsigned int new_clust = fat32_alloc_cluster(ctx);
+            if (new_clust == 0) {
+                kfree(cluster_buf);
+                return -1; /* disk full */
+            }
+            fat32_set_fat_entry(ctx, prev_cluster, new_clust);
+            cur_cluster = new_clust;
+            /* The new cluster is already zeroed by alloc, so entries[0].name[0]==0 */
+        } else {
+            cur_cluster = next;
+        }
+    }
+}
+
+/* =========================================================================
+ * fat32_mkdir – create a subdirectory
+ *
+ * Allocates a cluster, writes "." and ".." entries, then inserts an 8.3
+ * directory entry into the parent.
+ * ========================================================================= */
+
+int fat32_mkdir(fat32_context_t *ctx,
+                unsigned int parent_cluster,
+                const char *name,
+                fat_dir_entry_t *out_entry,
+                fat_dir_loc_t *out_loc) {
+    if (!ctx || !name) return -1;
+
+    /* Allocate a cluster for the new directory's contents */
+    unsigned int new_cluster = fat32_alloc_cluster(ctx);
+    if (new_cluster == 0) return -1;
+
+    /* Build "." and ".." entries */
+    void *dir_buf = kmalloc(ctx->bytes_per_cluster);
+    if (!dir_buf) return -1;
+    memset(dir_buf, 0, ctx->bytes_per_cluster);
+
+    fat_dir_entry_t *dot = (fat_dir_entry_t *)dir_buf;
+    memset(dot->name, ' ', 8);
+    memset(dot->ext, ' ', 3);
+    dot->name[0] = '.';
+    dot->attributes = FAT_ATTR_DIRECTORY;
+    dot->first_cluster_low  = new_cluster & 0xFFFF;
+    dot->first_cluster_high = (new_cluster >> 16) & 0xFFFF;
+    dot->file_size = 0;
+
+    fat_dir_entry_t *dotdot = (fat_dir_entry_t *)((char *)dir_buf + sizeof(fat_dir_entry_t));
+    memset(dotdot->name, ' ', 8);
+    memset(dotdot->ext, ' ', 3);
+    dotdot->name[0] = '.';
+    dotdot->name[1] = '.';
+    dotdot->attributes = FAT_ATTR_DIRECTORY;
+    dotdot->first_cluster_low  = parent_cluster & 0xFFFF;
+    dotdot->first_cluster_high = (parent_cluster >> 16) & 0xFFFF;
+    dotdot->file_size = 0;
+
+    if (fat32_write_cluster(ctx, new_cluster, dir_buf) < 0) {
+        kfree(dir_buf);
+        return -1;
+    }
+    kfree(dir_buf);
+
+    /* Insert directory entry into parent */
+    fat_dir_entry_t created;
+    fat_dir_loc_t created_loc;
+    if (fat32_create_file(ctx, parent_cluster, name, (void*)0,
+                          FAT_ATTR_DIRECTORY, &created, &created_loc) < 0) {
+        return -1;
+    }
+
+    /* Patch the cluster pointer into the entry */
+    created.first_cluster_low  = new_cluster & 0xFFFF;
+    created.first_cluster_high = (new_cluster >> 16) & 0xFFFF;
+    fat32_update_dir_entry(ctx, &created_loc, &created);
+
+    if (out_entry) memcpy(out_entry, &created, sizeof(fat_dir_entry_t));
+    if (out_loc)   memcpy(out_loc, &created_loc, sizeof(fat_dir_loc_t));
+    return 0;
+}
+
+/* =========================================================================
+ * fat32_delete_file – delete a file or directory entry
+ *
+ * Marks the directory entry as deleted (0xE5), then walks the cluster chain
+ * freeing every cluster.
+ * ========================================================================= */
+
+int fat32_delete_file(fat32_context_t *ctx,
+                      const fat_dir_entry_t *entry,
+                      const fat_dir_loc_t *loc) {
+    if (!ctx || !entry || !loc) return -1;
+
+    /* Free the cluster chain */
+    unsigned int cluster = ((unsigned int)entry->first_cluster_high << 16) |
+                            entry->first_cluster_low;
+
+    while (cluster >= 2 && cluster < FAT32_EOC_MIN && cluster != FAT32_BAD) {
+        unsigned int next = fat32_next_cluster(ctx, cluster);
+        fat32_set_fat_entry(ctx, cluster, FAT32_FREE);
+        cluster = next;
+    }
+
+    /* Mark directory entry as deleted */
+    fat_dir_entry_t deleted;
+    memcpy(&deleted, entry, sizeof(fat_dir_entry_t));
+    deleted.name[0] = 0xE5;
+    return fat32_update_dir_entry(ctx, loc, &deleted);
 }

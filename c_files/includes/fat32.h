@@ -4,7 +4,7 @@
 /* =========================================================================
  * fat32.h – FAT12/FAT16/FAT32 Filesystem Driver
  *
- * Provides read-only access to FAT12, FAT16 and FAT32 partitions.
+ * Provides read/write access to FAT12, FAT16 and FAT32 partitions.
  * Supports 8.3 short filenames and VFAT long file names (LFN).
  *
  * Usage
@@ -358,6 +358,86 @@ unsigned int fat32_alloc_cluster(fat32_context_t *ctx);
  * fat32_update_dir_entry – write a directory entry back to its original location.
  */
 int fat32_update_dir_entry(fat32_context_t *ctx, const fat_dir_loc_t *loc, const fat_dir_entry_t *entry);
+
+/**
+ * fat32_write_file – write data to an existing file, extending clusters as needed.
+ *
+ * Follows the existing cluster chain and allocates new clusters when the file
+ * grows beyond its current allocation.  Updates the directory entry file_size
+ * on disk via the supplied location.
+ *
+ * @param ctx     Filesystem context.
+ * @param entry   Directory entry (will be modified in-place with new size).
+ * @param loc     Disk location of the directory entry (for writeback).
+ * @param offset  Byte offset within the file to begin writing.
+ * @param data    Source data buffer.
+ * @param size    Number of bytes to write.
+ * @return        Number of bytes written, or -1 on error.
+ */
+int fat32_write_file(fat32_context_t *ctx,
+                     fat_dir_entry_t *entry,
+                     const fat_dir_loc_t *loc,
+                     unsigned int offset,
+                     const void *data,
+                     unsigned int size);
+
+/**
+ * fat32_create_file – create a new 8.3 file entry in a directory.
+ *
+ * Scans the directory for a free slot (0x00 or 0xE5 first byte), writes
+ * an 8.3 entry with the given name, and optionally allocates an initial
+ * cluster.  The name must already be in 8.3 format (up to 8+3 chars).
+ *
+ * @param ctx           Filesystem context.
+ * @param dir_cluster   First cluster of the parent directory.
+ * @param filename      Short name (e.g. "README"), up to 8 chars.
+ * @param ext           Extension (e.g. "TXT"), up to 3 chars.  NULL for none.
+ * @param attributes    FAT_ATTR_* flags for the new entry.
+ * @param out_entry     Receives the created directory entry.
+ * @param out_loc       Receives the disk location of the new entry.
+ * @return              0 on success, -1 on error.
+ */
+int fat32_create_file(fat32_context_t *ctx,
+                      unsigned int dir_cluster,
+                      const char *filename,
+                      const char *ext,
+                      unsigned char attributes,
+                      fat_dir_entry_t *out_entry,
+                      fat_dir_loc_t *out_loc);
+
+/**
+ * fat32_mkdir – create a new subdirectory inside a parent directory.
+ *
+ * Allocates a cluster for the new directory, writes the '.' and '..' entries,
+ * and inserts an 8.3 directory entry into the parent.
+ *
+ * @param ctx           Filesystem context.
+ * @param parent_cluster First cluster of the parent directory.
+ * @param name          Directory name (up to 8 chars, 8.3 short name).
+ * @param out_entry     Receives the created directory entry.
+ * @param out_loc       Receives the disk location of the new entry.
+ * @return              0 on success, -1 on error.
+ */
+int fat32_mkdir(fat32_context_t *ctx,
+                unsigned int parent_cluster,
+                const char *name,
+                fat_dir_entry_t *out_entry,
+                fat_dir_loc_t *out_loc);
+
+/**
+ * fat32_delete_file – mark a file's directory entry as deleted and free its clusters.
+ *
+ * Sets the first byte of the 8.3 entry to 0xE5 and walks the cluster chain,
+ * marking each cluster as FREE in the FAT.
+ *
+ * @param ctx   Filesystem context.
+ * @param entry The directory entry to delete.
+ * @param loc   Disk location of the directory entry.
+ * @return      0 on success, -1 on error.
+ */
+int fat32_delete_file(fat32_context_t *ctx,
+                      const fat_dir_entry_t *entry,
+                      const fat_dir_loc_t *loc);
 
 /**
  * fat32_dump_info – log the parsed filesystem parameters to the serial port.
