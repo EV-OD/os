@@ -46,7 +46,7 @@
  * at 0xC0300000 and extends to 0xC0400000 (1 MB of initial heap space).
  * ------------------------------------------------------------------------- */
 #define KHEAP_VSTART  0xC0300000u   /* virtual start of heap                  */
-#define KHEAP_VEND    0xC03FF000u   /* virtual end  of heap (non-inclusive)   */
+#define KHEAP_VEND    0xC0800000u   /* virtual end  of heap (5 MB – fits 3 MB FB back-buffer) */
 #define KHEAP_SIZE    (KHEAP_VEND - KHEAP_VSTART)
 
 /* -------------------------------------------------------------------------
