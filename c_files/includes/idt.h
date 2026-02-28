@@ -27,24 +27,38 @@ struct idt_ptr {
 
 /*
  * Register snapshot as produced by pusha in the common ISR stub.
- * Order matches pusha: eax, ecx, edx, ebx, esp (original), ebp, esi, edi.
+ *
+ * pusha pushes in order: EAX (first, highest addr), ECX, EDX, EBX,
+ * original ESP, EBP, ESI, EDI (last, lowest addr).
+ * The struct fields are ordered from LOWEST address (EDI) to HIGHEST (EAX)
+ * so a pointer to the first EDI slot maps correctly to this struct.
  */
 struct cpu_state {
-    unsigned int eax;
-    unsigned int ecx;
-    unsigned int edx;
-    unsigned int ebx;
-    unsigned int esp;
-    unsigned int ebp;
-    unsigned int esi;
     unsigned int edi;
+    unsigned int esi;
+    unsigned int ebp;
+    unsigned int esp;   /* original ESP saved by pusha (ignored by popa) */
+    unsigned int ebx;
+    unsigned int edx;
+    unsigned int ecx;
+    unsigned int eax;
 } __attribute__((packed));
 
+/*
+ * Stack frame pushed by the CPU on interrupt / exception and by our ISR
+ * macros (error_code slot).
+ *
+ * When the interrupt causes a privilege-level change (ring 3 → ring 0),
+ * the CPU also pushes user_esp and user_ss.  Those fields are only valid
+ * when (cs & 3) != 0.
+ */
 struct stack_state {
     unsigned int error_code;
     unsigned int eip;
     unsigned int cs;
     unsigned int eflags;
+    unsigned int user_esp;  /* valid only on ring-3 → ring-0 transition */
+    unsigned int user_ss;   /* valid only on ring-3 → ring-0 transition */
 } __attribute__((packed));
 
 void idt_init(void);

@@ -4,9 +4,11 @@
 /* =========================================================================
  * process.h – Process / task descriptor for the CFS scheduler
  *
- * Each process is a kernel thread (ring 0) with its own kernel stack.
- * User-mode processes will add a separate user stack and page directory
- * once full user-mode support is implemented.
+ * Each process has its own kernel stack for interrupt handling.
+ * Kernel-mode processes (ring 0) run entirely on that stack.
+ * User-mode processes (ring 3) additionally have a user page directory
+ * and a user-space stack; on interrupts the CPU switches to the kernel
+ * stack via TSS.esp0.
  *
  * CFS vruntime model
  * ------------------
@@ -20,13 +22,6 @@
  * The scheduler always picks the RUNNABLE process with the smallest vruntime.
  * When a new process is added its vruntime is set to the current minimum
  * vruntime so it is not artificially preferred over longer-running processes.
- *
- * Nice value → weight mapping (simplified Linux table, nice -20..+19):
- *   nice ≤ -20 → weight 88761  (runs ~87× more than nice 19)
- *   nice   0   → weight  1024  (baseline)
- *   nice ≥ 19  → weight    15  (runs ~87× less than nice -20)
- *
- * Reference: Linux kernel sched/fair.c, Documentation/scheduler/sched-design-CFS.rst
  * ========================================================================= */
 
 /* -------------------------------------------------------------------------
@@ -82,7 +77,17 @@ typedef struct process {
     /* --- Kernel stack and saved context ----------------------------------- */
     unsigned char  *kstack;       /**< Base (lowest address) of kernel stack  */
     unsigned int    saved_esp;    /**< Kernel ESP saved at last context switch */
-                                  /* Points to the pusha block on kstack       */
+                                  /* Points to the seg-save + pusha block     */
+
+    /* --- User-mode fields ------------------------------------------------ */
+    int             is_user;      /**< 1 = ring-3 user process, 0 = kernel   */
+    unsigned int   *page_dir;     /**< User page directory (kernel-virt ptr)  */
+                                  /* NULL for kernel-mode processes            */
+    int             exit_status;  /**< Exit code set by SYS_EXIT              */
+
+    /* --- Parent / wait relationship -------------------------------------- */
+    unsigned int    parent_pid;   /**< PID of the process that spawned this   */
+    int             waited;       /**< 1 = parent has collected exit_status   */
 
     /* --- Linked list for run queue --------------------------------------- */
     struct process *next;         /**< Next process in the run queue (or NULL)*/
@@ -122,7 +127,7 @@ static inline unsigned int nice_to_weight_val(int nice)
 void process_init(void);
 
 /**
- * process_create – allocate a new process with a kernel-mode entry point.
+ * process_create – allocate a new kernel-mode (ring 0) process.
  *
  * Sets up a fake interrupt-return frame on the new process's kernel stack so
  * the scheduler can restore it via popa + iret.
@@ -136,8 +141,50 @@ void process_init(void);
 process_t *process_create(const char *name, void (*entry)(void), int nice);
 
 /**
+ * process_create_user – allocate a new user-mode (ring 3) process.
+ *
+ * Creates a per-process page directory, maps user code at USER_CODE_VADDR,
+ * maps a user stack page, and builds a ring-3 iret frame (5-dword:
+ * EIP, CS=0x1B, EFLAGS, ESP, SS=0x23) on the kernel stack.
+ *
+ * @param name       Human-readable name.
+ * @param code       Pointer to the user code buffer (kernel-virtual).
+ * @param code_size  Size of the code in bytes.
+ * @param entry_off  Offset within code to the entry point.
+ * @param nice       Nice value in [-20, +19].
+ *
+ * @return  Pointer to the new process_t, or NULL on failure.
+ */
+process_t *process_create_user(const char *name,
+                               const void *code, unsigned int code_size,
+                               unsigned int entry_off, int nice);
+
+/**
  * process_get_next_pid – return the next available PID (auto-incremented).
  */
 unsigned int process_get_next_pid(void);
+
+/**
+ * process_find – look up a process by PID.
+ * Scans the scheduler's run queue and the dead-list.
+ *
+ * @return  Pointer to the process, or NULL if not found.
+ */
+process_t *process_find(unsigned int pid);
+
+/**
+ * process_wait – block the calling process until a child exits.
+ * Returns the child's exit status, or -1 if the child does not exist.
+ * For now, busy-waits (polling) until the child enters PROC_DEAD state.
+ *
+ * @param child_pid  PID of the child process to wait for.
+ * @return           Exit status of the child.
+ */
+int process_wait(unsigned int child_pid);
+
+/**
+ * process_destroy – free a dead process's resources (kstack, page dir, etc.).
+ */
+void process_destroy(process_t *proc);
 
 #endif /* PROCESS_H */

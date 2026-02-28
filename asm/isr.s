@@ -2,17 +2,27 @@ global common_isr_stub
 extern interrupt_handler
 
 
-; ISR_NOERR - Macro to define an ISR for a CPU exception that does not push an error code
+; ---------------------------------------------------------------------------
+; ISR_NOERR – CPU exception that does NOT push an error code.
+;
+; Push order (matching IRQ layout):
+;   push 0          ; dummy error code
+;   push int_num    ; interrupt number (on top)
+;
+; Stack after both pushes (ESP first):
+;   ESP+0: int_num   ESP+4: 0 (error)   ESP+8: EIP  ...
+; ---------------------------------------------------------------------------
 %macro ISR_NOERR 1
     global isr%1
 isr%1:
-    push dword %1         ; interrupt number
-    push dword 0          ; dummy error code to keep a uniform stack layout
+    push dword 0          ; dummy error code (to match IRQ / ISR_ERR layout)
+    push dword %1         ; interrupt number (on top)
     jmp common_isr_stub
 %endmacro
 
 
-; ISR_ERR - Macro to define an ISR for a CPU exception that pushes an error code
+; ISR_ERR – CPU exception that DOES push an error code.
+; CPU already pushed the error code; we just push the interrupt number on top.
 %macro ISR_ERR 1
     global isr%1
 isr%1:
@@ -20,8 +30,7 @@ isr%1:
     jmp common_isr_stub
 %endmacro
 
-; IRQ - Macro to define an ISR for a hardware interrupt (IRQ)
-; args are IRQ number (0-15) and remapped vector (32-47)
+; IRQ – hardware interrupt (IRQ 0-15, remapped to vectors 32-47).
 %macro IRQ 2
     global irq%1
 irq%1:
@@ -32,61 +41,92 @@ irq%1:
 
 section .text
 
-; Common handler shared by all ISRs/IRQs.
-; Stack on entry (top first):
-;   [dummy/CPU error code]   ; 0 for no-error IRQ/ISR, real code for error ISRs
-;   [interrupt number]
-;   [eip]
-;   [cs]
-;   [eflags]
-; We push all general registers with pusha, then call the C dispatcher:
-;   interrupt_handler(struct cpu_state *cpu, struct stack_state *stack, unsigned int interrupt)
+; ===========================================================================
+; common_isr_stub – shared entry point for all ISRs and IRQs.
+;
+; Stack on entry (top → bottom, i.e. ESP first):
+;   [int_num]           pushed by ISR/IRQ macro
+;   [error_code / 0]    pushed by ISR/IRQ macro (or CPU for ISR_ERR)
+;   [EIP]               pushed by CPU
+;   [CS]                pushed by CPU
+;   [EFLAGS]            pushed by CPU
+;   [user_ESP]          pushed by CPU only if ring 3 → ring 0 transition
+;   [user_SS]           pushed by CPU only if ring 3 → ring 0 transition
+;
+; We save data-segment registers and all GP registers, switch to kernel
+; data segments, call the C dispatcher, then restore everything and iret.
+;
+; C prototype:
+;   unsigned int interrupt_handler(struct cpu_state *cpu,
+;                                  struct stack_state *stack,
+;                                  unsigned int interrupt);
+; ===========================================================================
 common_isr_stub:
-    ; Interrupt Service Routine (ISR) handler epilogue
-    ; 
-    ; Saves all general purpose registers to create a cpu_state structure,
-    ; then calls the interrupt_handler C function with appropriate arguments.
-    ;
-    ; Stack layout at entry (after interrupt/exception):
-    ;   [ESP+36] = interrupt number
-    ;   [ESP+32] = error code or 0
-    ;   [ESP+28] = return EIP
-    ;   [ESP+24] = return CS
-    ;   [ESP+20] = EFLAGS
-    ;
-    ; Execution flow:
-    ;   1. Save all GP registers (pusha) - creates cpu_state at ESP
-    ;   2. Prepare arguments for interrupt_handler:
-    ;      - arg3: pointer to cpu_state (all saved registers)
-    ;      - arg2: pointer to stack_state (error code, EIP, CS, EFLAGS)
-    ;      - arg1: interrupt number
-    ;   3. Call interrupt_handler(int_num, stack_state*, cpu_state*)
-    ;   4. Clean up stack and restore registers
-    ;   5. Drop error code and interrupt number from stack
-    ;   6. Return from interrupt (iret)
-    ; specific order: AX/EAX, CX/ECX, DX/EDX, BX/EBX, SP/ESP, BP/EBP, SI/ESI, and DI/EDI
-    pusha
+    pusha                           ; save GP regs (EAX..EDI, 32 bytes)
 
-    ; eax holds pointer to cpu_state (top of saved regs)
+    ; Save data-segment registers (16 bytes)
+    push ds
+    push es
+    push fs
+    push gs
+
+    ; Load kernel data segment into all data segment registers so we can
+    ; safely access kernel memory from C code.
+    mov ax, 0x10                    ; GDT_KERNEL_DATA_SELECTOR
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    ; --------------- stack layout after all pushes -------------------------
+    ;   ESP+ 0: GS           (segment save, 4 B)
+    ;   ESP+ 4: FS
+    ;   ESP+ 8: ES
+    ;   ESP+12: DS
+    ;   ESP+16: EDI          ← start of pusha block (cpu_state*)
+    ;   ESP+20: ESI
+    ;   ESP+24: EBP
+    ;   ESP+28: (orig ESP from pusha – ignored by popa)
+    ;   ESP+32: EBX
+    ;   ESP+36: EDX
+    ;   ESP+40: ECX
+    ;   ESP+44: EAX          ← end of pusha block
+    ;   ESP+48: int_num
+    ;   ESP+52: error_code   ← start of stack_state*
+    ;   ESP+56: EIP
+    ;   ESP+60: CS
+    ;   ESP+64: EFLAGS
+    ;   ESP+68: user_ESP     (ring 3 only)
+    ;   ESP+72: user_SS      (ring 3 only)
+    ; -----------------------------------------------------------------------
+
+    ; Build C call arguments (cdecl: push right-to-left)
     mov eax, esp
-    ; push args: interrupt number, stack_state*, cpu_state*
-    push dword [eax + 32]          ; interrupt number
-    lea ecx, [eax + 36]            ; stack_state pointer (error code/eip/cs/eflags)
+    push dword [eax + 48]          ; arg3: interrupt number
+    lea ecx, [eax + 52]            ; arg2: stack_state* (error_code → …)
     push ecx
-    push eax
+    lea ecx, [eax + 16]            ; arg1: cpu_state*   (EDI → EAX)
+    push ecx
     call interrupt_handler
-    add esp, 12
+    add esp, 12                     ; pop 3 arguments
 
-    ; interrupt_handler returns the new kernel ESP in EAX (0 = no switch).
-    ; If non-zero, switch to the new process's kernel stack before restoring
-    ; registers so that popa + iret execute in the correct process context.
+    ; interrupt_handler returns new kernel ESP in EAX (0 = no switch).
+    ; On context switch, the new stack has the same layout (seg regs + pusha
+    ; + int_num + error_code + iret frame), so the restore sequence below
+    ; works identically on the new stack.
     test eax, eax
     jz .no_ctx_switch
-    mov esp, eax          ; switch to new process's saved kernel stack
+    mov esp, eax                    ; switch to new process's kernel stack
 .no_ctx_switch:
 
-    popa
-    add esp, 8                     ; drop error code + interrupt number
+    ; Restore segment registers
+    pop gs
+    pop fs
+    pop es
+    pop ds
+
+    popa                            ; restore GP registers
+    add esp, 8                      ; drop int_num + error_code
     iret
 
 ; CPU exceptions without error code
@@ -142,5 +182,9 @@ IRQ 12, 44
 IRQ 13, 45
 IRQ 14, 46
 IRQ 15, 47
+
+; Syscall gate – int 0x80 (vector 128).
+; Registered with DPL=3 in the IDT so ring-3 code can invoke it.
+ISR_NOERR 128
 
 section .note.GNU-stack noalloc noexec nowrite progbits

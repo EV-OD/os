@@ -2,32 +2,47 @@
 #define PAGING_H
 
 /* =========================================================================
- * paging.h – x86 paging definitions and API
+ * paging.h – x86 paging: 4 MB PSE pages + 4 KB page tables
  *
  * The kernel uses a higher-half layout: virtual addresses 0xC0000000+
  * map to physical 0x00000000+.  The initial 4 MB page is set up at
- * boot time in loader.s.  This header exposes the page-directory entry
- * flag bits, the page_directory symbol from assembly, and helper functions.
+ * boot time in loader.s.
+ *
+ * User-mode processes use fine-grained 4 KB page tables so we can map
+ * individual pages with user-accessible flags while keeping per-process
+ * virtual address spaces isolated.
  *
  * Reference: Intel Software Developer's Manual Vol. 3A, Chapter 4.
  * ========================================================================= */
 
 /* -------------------------------------------------------------------------
- * Page-directory / page-table entry flag bits (Intel Vol. 3A Ch 4.3)
+ * Page-directory entry (PDE) flag bits (Intel Vol. 3A Ch 4.3)
  * ------------------------------------------------------------------------- */
 
 #define PDE_PRESENT      (1u << 0)   /* P   – entry is present               */
-#define PDE_WRITABLE     (1u << 1)   /* R/W – read-write  (0 = read-only)     */
+#define PDE_WRITABLE     (1u << 1)   /* R/W – read-write  (0 = read-only)    */
 #define PDE_USER         (1u << 2)   /* U/S – PL3 accessible (0 = PL0 only)  */
-#define PDE_WRITE_THRU   (1u << 3)   /* PWT – write-through caching           */
-#define PDE_CACHE_DIS    (1u << 4)   /* PCD – cache disabled                  */
-#define PDE_ACCESSED     (1u << 5)   /* A   – set by CPU on any access        */
-#define PDE_DIRTY        (1u << 6)   /* D   – set by CPU on write (4 MB PDEs) */
-#define PDE_PAGE_SIZE    (1u << 7)   /* PS  – 1 = 4 MB page, 0 = PT pointer  */
+#define PDE_WRITE_THRU   (1u << 3)   /* PWT – write-through caching          */
+#define PDE_CACHE_DIS    (1u << 4)   /* PCD – cache disabled                 */
+#define PDE_ACCESSED     (1u << 5)   /* A   – set by CPU on any access       */
+#define PDE_DIRTY        (1u << 6)   /* D   – set by CPU on write (4 MB PDEs)*/
+#define PDE_PAGE_SIZE    (1u << 7)   /* PS  – 1 = 4 MB page, 0 = PT pointer */
 #define PDE_GLOBAL       (1u << 8)   /* G   – global page (requires CR4.PGE) */
 
 /* Convenience combination for a present, writable, 4 MB identity PDE */
 #define PDE_4MB_RW  (PDE_PRESENT | PDE_WRITABLE | PDE_PAGE_SIZE)
+
+/* -------------------------------------------------------------------------
+ * Page-table entry (PTE) flag bits (4 KB pages)
+ * ------------------------------------------------------------------------- */
+
+#define PTE_PRESENT      (1u << 0)   /* P   – entry is present               */
+#define PTE_RW           (1u << 1)   /* R/W – read-write                     */
+#define PTE_USER         (1u << 2)   /* U/S – PL3 accessible                 */
+#define PTE_WRITE_THRU   (1u << 3)   /* PWT – write-through                  */
+#define PTE_CACHE_DIS    (1u << 4)   /* PCD – cache disabled                 */
+#define PTE_ACCESSED     (1u << 5)   /* A   – accessed by CPU                */
+#define PTE_DIRTY        (1u << 6)   /* D   – dirty (written)                */
 
 /* -------------------------------------------------------------------------
  * Page / frame sizes
@@ -44,17 +59,24 @@
  * Higher-half kernel constants
  * ------------------------------------------------------------------------- */
 
-/*
- * Virtual base address of the kernel.  Physical address 0x00000000 is
- * mapped to this virtual address, so phys_to_virt(p) = p + KERNEL_VIRTUAL_BASE
- * and virt_to_phys(v) = v - KERNEL_VIRTUAL_BASE.
- */
 #define KERNEL_VIRTUAL_BASE  0xC0000000u
 #define KERNEL_PAGE_INDEX    (KERNEL_VIRTUAL_BASE >> 22)   /* PDE index 768 */
 
 /* Convert between physical and virtual addresses within the kernel mapping. */
 #define PHYS_TO_VIRT(p)  ((void *)((unsigned int)(p) + KERNEL_VIRTUAL_BASE))
 #define VIRT_TO_PHYS(v)  ((unsigned int)(v) - KERNEL_VIRTUAL_BASE)
+
+/* -------------------------------------------------------------------------
+ * User-space virtual address layout
+ *
+ * 0x00000000 – 0x003FFFFF : unmapped (null-pointer guard, 4 MB)
+ * 0x08048000               : default user code start (traditional ELF)
+ * 0xBFFFF000               : user stack page (grows downward from top)
+ * 0xC0000000 – 0xFFFFFFFF : kernel space (shared across all processes)
+ * ------------------------------------------------------------------------- */
+#define USER_CODE_VADDR      0x08048000u
+#define USER_STACK_TOP       0xBFFFFFFCu   /* initial ESP for user process  */
+#define USER_STACK_PAGE      0xBFFFF000u   /* 4KB page containing the stack */
 
 /* -------------------------------------------------------------------------
  * Types
@@ -80,52 +102,64 @@ typedef unsigned int pte_t;
  * Symbols exported from loader.s
  * ------------------------------------------------------------------------- */
 
-/*
- * The page directory created at compile time in loader.s.
- * After boot, only entry 768 (KERNEL_PAGE_INDEX) is present, mapping
- * virtual [0xC0000000, 0xC0400000) to physical [0, 4 MB).
- * Entry 0 (identity map) is cleared once we reach the higher half.
- */
 extern pde_t page_directory[PAGE_DIR_ENTRIES];
 
 /* -------------------------------------------------------------------------
- * Public API
+ * Core API (kernel paging)
+ * ------------------------------------------------------------------------- */
+
+void paging_init(void);
+unsigned int paging_cr3(void);
+void paging_invlpg(void *vaddr);
+void paging_map_4mb(unsigned int index, unsigned int phys_frame, unsigned int flags);
+
+/* -------------------------------------------------------------------------
+ * Per-process page directory management (user-mode support)
  * ------------------------------------------------------------------------- */
 
 /**
- * paging_init – verify and log the higher-half paging state.
+ * paging_create_user_directory – allocate a new page directory for a user
+ * process.  Copies kernel PDE entries (indices 768-1023) from the boot
+ * page directory.  Lower-half entries are zeroed.
  *
- * Called from kernel_init() after GDT, IDT and serial are ready so that
- * the log output is visible.
+ * @return  Virtual (kernel-mapped) pointer to the new 4 KB page directory,
+ *          or NULL (0) on allocation failure.
  */
-void paging_init(void);
+unsigned int *paging_create_user_directory(void);
 
 /**
- * paging_cr3 – return the physical address currently stored in CR3.
+ * paging_map_page – map a single 4 KB page in a given page directory.
+ *
+ * If the PDE for this virtual address doesn't have a page table yet,
+ * one is allocated from the PFA and installed.
+ *
+ * @param pd     Virtual address of the target page directory.
+ * @param virt   Virtual address to map (will be 4 KB-aligned down).
+ * @param phys   Physical address of the 4 KB frame to map.
+ * @param flags  PTE flags (PTE_PRESENT | PTE_RW | PTE_USER …).
  */
-unsigned int paging_cr3(void);
+void paging_map_page(unsigned int *pd, unsigned int virt,
+                     unsigned int phys, unsigned int flags);
 
 /**
- * paging_invlpg – invalidate the TLB entry for a single virtual address.
+ * paging_destroy_user_directory – free a user page directory and all its
+ * non-kernel page tables.  User-space page frames mapped by PTEs are also
+ * freed back to the PFA.
  *
- * Must be called after modifying a PDE or PTE that was previously marked
- * present.  If the entry was not-present before the change, invlpg is
- * unnecessary (but harmless).
- *
- * @param vaddr  Any virtual address within the 4 KB / 4 MB page to flush.
+ * @param pd  Virtual address of the page directory to destroy.
  */
-void paging_invlpg(void *vaddr);
+void paging_destroy_user_directory(unsigned int *pd);
 
 /**
- * paging_map_4mb – install a single 4 MB PDE mapping.
+ * paging_switch_directory – load a page directory into CR3.
  *
- * @param index      Page-directory index (0-1023).  Virtual address covered is
- *                   [index * 4MB, (index+1) * 4MB).
- * @param phys_frame Physical frame number (upper 10 bits of the 4 MB-aligned
- *                   physical address, i.e. phys_addr >> 22).
- * @param flags      Additional flag bits (OR-ed with PDE_4MB_RW internally).
- *                   Pass 0 for defaults (present, writable, supervisor only).
+ * @param pd  Virtual (kernel-mapped) pointer to the page directory.
  */
-void paging_map_4mb(unsigned int index, unsigned int phys_frame, unsigned int flags);
+void paging_switch_directory(unsigned int *pd);
+
+/**
+ * paging_get_kernel_directory – return the boot/kernel page directory.
+ */
+unsigned int *paging_get_kernel_directory(void);
 
 #endif /* PAGING_H */

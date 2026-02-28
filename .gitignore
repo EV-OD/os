@@ -6,3 +6,5 @@
 build/*
 
 grub-0.97/*
+
+test_mnt/*

@@ -27,6 +27,7 @@
 #include "process.h"
 #include "pit.h"
 #include "tss.h"
+#include "paging.h"
 #include "log.h"
 
 /* -------------------------------------------------------------------------
@@ -181,38 +182,49 @@ void sched_start(void)
     current_proc  = first;
 
     /* Point TSS.esp0 at the top of this process's kernel stack so that
-     * if a ring-3 process is interrupted the CPU uses the right stack.
-     * (For ring-0 kernel tasks the TSS isn't used for the switch, but
-     * set it correctly for when user-mode is added later.) */
+     * if a ring-3 process is interrupted the CPU uses the right stack. */
     tss_set_kernel_stack((unsigned int)(first->kstack + PROC_KSTACK_SIZE));
+
+    /* Switch to user page directory if this is a user-mode process. */
+    if (first->is_user && first->page_dir) {
+        paging_switch_directory(first->page_dir);
+    }
 
     esp = first->saved_esp;
 
-    log_info("[sched] starting '%s' pid=%d esp=0x%x",
-             first->name, (int)first->pid, esp);
+    log_info("[sched] starting '%s' pid=%d esp=0x%x user=%d",
+             first->name, (int)first->pid, esp, first->is_user);
 
     /*
      * Restore the process's saved context and enter it via iret.
      *
-     * Stack at esp (built by process_create):
-     *   [esp+0..28] = pusha block (8 registers, zeroed for new procs)
-     *   [esp+32]    = dummy int number (32)
-     *   [esp+36]    = dummy error code (0)
-     *   [esp+40]    = EIP  (entry_point)
-     *   [esp+44]    = CS   (0x08)
-     *   [esp+48]    = EFLAGS (0x202, IF=1)
+     * Stack at esp (built by process_create / process_create_user):
+     *   [esp+ 0..15] = saved GS, FS, ES, DS  (4 × 4 = 16 bytes)
+     *   [esp+16..47] = pusha block            (8 × 4 = 32 bytes)
+     *   [esp+48]     = int_num
+     *   [esp+52]     = error_code
+     *   [esp+56]     = EIP
+     *   [esp+60]     = CS
+     *   [esp+64]     = EFLAGS
+     *   [esp+68]     = user ESP  (ring 3 only)
+     *   [esp+72]     = user SS   (ring 3 only)
      *
      * Sequence:
-     *   1. Set ESP = first->saved_esp  (switch to process's kernel stack)
-     *   2. popa                        (restore 8 GP registers)
-     *   3. add $8, esp                 (skip error_code + int_number)
-     *   4. iret                        (pop EIP, CS, EFLAGS → enter process)
+     *   1. Set ESP = saved_esp
+     *   2. pop gs, fs, es, ds   (restore segment registers)
+     *   3. popa                 (restore GP registers)
+     *   4. add $8, esp          (skip int_num + error_code)
+     *   5. iret                 (enter process)
      */
     __asm__ volatile(
         "mov %0, %%esp\n\t"    /* 1. switch stacks               */
-        "popa\n\t"              /* 2. restore GP registers        */
-        "add $8, %%esp\n\t"    /* 3. skip dummy error+int_num    */
-        "iret"                  /* 4. enter the process           */
+        "pop %%gs\n\t"          /* 2. restore segment registers   */
+        "pop %%fs\n\t"
+        "pop %%es\n\t"
+        "pop %%ds\n\t"
+        "popa\n\t"              /* 3. restore GP registers        */
+        "add $8, %%esp\n\t"    /* 4. skip int_num + error_code   */
+        "iret"                  /* 5. enter the process           */
         :
         : "r"(esp)
         : "memory"
@@ -247,10 +259,26 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
 
     /*
      * Save the current process's kernel stack pointer.
-     * cpu IS the pointer to the pusha block on the kernel stack,
-     * which is exactly saved_esp.
+     * cpu points to the pusha block on the kernel stack.
+     * But our new common_isr_stub also pushes 4 segment registers (16 bytes)
+     * below the pusha block.  saved_esp must point to the GS slot (bottom
+     * of the saved state), which is at cpu - 4 dwords = cpu - 16 bytes.
      */
-    current_proc->saved_esp = (unsigned int)cpu;
+    current_proc->saved_esp = (unsigned int)cpu - 16u;
+
+    /*
+     * If the current process is DEAD (called SYS_EXIT), don't re-enqueue.
+     * Just pick the next process.
+     */
+    if (current_proc->state == PROC_DEAD) {
+        next = dequeue_min();
+        if (!next) {
+            log_error("[sched] all processes dead – halting");
+            __asm__ volatile("cli; hlt");
+            return 0;
+        }
+        goto do_switch;
+    }
 
     /*
      * Update vruntime:
@@ -279,12 +307,28 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
         return 0;
     }
 
+do_switch:
     /*
      * Context switch to `next`.
      * Update TSS.esp0 so the CPU loads the right kernel stack on the
-     * next ring-0 entry (important when user-mode is added later).
+     * next ring-0 entry (critical for user-mode processes).
      */
     tss_set_kernel_stack((unsigned int)(next->kstack + PROC_KSTACK_SIZE));
+
+    /*
+     * Switch page directories if the new process has a different one.
+     * - Kernel processes use the boot page directory (NULL page_dir).
+     * - User processes have their own page directory.
+     * If switching between two kernel processes, no CR3 change is needed.
+     */
+    if (next->page_dir != current_proc->page_dir) {
+        if (next->is_user && next->page_dir) {
+            paging_switch_directory(next->page_dir);
+        } else if (!next->is_user) {
+            /* Switching back to a kernel process – restore boot PD. */
+            paging_switch_directory(paging_get_kernel_directory());
+        }
+    }
 
     next->state  = PROC_RUNNING;
     current_proc = next;

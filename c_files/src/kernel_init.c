@@ -33,6 +33,9 @@
 #include "pit.h"
 #include "log.h"
 #include "vfs.h"
+#include "syscall.h"
+#include "process.h"
+#include "sched.h"
 
 /*
  * Linker-script boundary symbols for the kernel image.
@@ -105,6 +108,19 @@ void kernel_init(unsigned int mb_magic, multiboot_info_t *mb)
      */
     pit_init(PIT_TICK_MS);
     pic_clear_mask(0);  /* unmask IRQ0 (PIT) */
+
+    /*
+     * Initialise the syscall interface (int 0x80 handler).
+     * Must come after isr_install() registered the ISR stub.
+     */
+    syscall_init();
+
+    /*
+     * Initialise the process and scheduler subsystems.
+     * Must come before any process_create*() calls.
+     */
+    process_init();
+    sched_init();
 
     interrupts_enable();
 }

@@ -1,0 +1,1 @@
+sudo mount -t vfat -o loop ./build/disk.img ./test_mnt

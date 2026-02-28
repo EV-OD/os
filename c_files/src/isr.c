@@ -37,6 +37,9 @@ extern void irq4(void);  extern void irq5(void);  extern void irq6(void);  exter
 extern void irq8(void);  extern void irq9(void);  extern void irq10(void); extern void irq11(void);
 extern void irq12(void); extern void irq13(void); extern void irq14(void); extern void irq15(void);
 
+/* Syscall gate – int 0x80 (vector 128) */
+extern void isr128(void);
+
 static void set_isr(int n, unsigned int base)
 {
     idt_set_gate(n, base, GDT_KERNEL_CODE_SELECTOR,
@@ -97,6 +100,10 @@ void isr_install(void)
 
     /* Register a default handler for the PIT timer to avoid "Unhandled interrupt: 32" spam. */
     register_interrupt_handler(32, timer_stub);
+
+    /* Syscall gate – DPL=3 so ring-3 code can invoke int 0x80. */
+    idt_set_gate(128, (unsigned int)isr128, GDT_KERNEL_CODE_SELECTOR,
+                 IDT_FLAG_PRESENT | IDT_FLAG_RING3 | IDT_FLAG_INTERRUPT_32);
 }
 
 void register_interrupt_handler(unsigned int interrupt, isr_handler_t handler)
