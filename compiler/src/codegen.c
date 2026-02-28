@@ -118,16 +118,28 @@ static void emit_binop(Codegen *cg, char op, char op2) {
         emit8(cg,0x0F); emit8(cg,0xB6); emit8(cg,0xC0);
     }
     else if (op == '<') {
-        emit8(cg,0x39); emit8(cg,0xC3);
-        if (op2 == '=') { emit8(cg,0x0F); emit8(cg,0x9E); emit8(cg,0xC0); } /* setle al */
-        else { emit8(cg,0x0F); emit8(cg,0x9C); emit8(cg,0xC0); } /* setl al */
-        emit8(cg,0x0F); emit8(cg,0xB6); emit8(cg,0xC0);
+        if (op2 == '<') { /* shl: ebx=value, eax=count */
+            emit8(cg,0x89); emit8(cg,0xC1); /* mov ecx, eax  (count -> CL) */
+            emit8(cg,0x89); emit8(cg,0xD8); /* mov eax, ebx  (value -> EAX) */
+            emit8(cg,0xD3); emit8(cg,0xE0); /* shl eax, cl */
+        } else {
+            emit8(cg,0x39); emit8(cg,0xC3);
+            if (op2 == '=') { emit8(cg,0x0F); emit8(cg,0x9E); emit8(cg,0xC0); } /* setle al */
+            else { emit8(cg,0x0F); emit8(cg,0x9C); emit8(cg,0xC0); } /* setl al */
+            emit8(cg,0x0F); emit8(cg,0xB6); emit8(cg,0xC0);
+        }
     }
     else if (op == '>') {
-        emit8(cg,0x39); emit8(cg,0xC3);
-        if (op2 == '=') { emit8(cg,0x0F); emit8(cg,0x9D); emit8(cg,0xC0); } /* setge al */
-        else { emit8(cg,0x0F); emit8(cg,0x9F); emit8(cg,0xC0); } /* setg al */
-        emit8(cg,0x0F); emit8(cg,0xB6); emit8(cg,0xC0);
+        if (op2 == '>') { /* sar: ebx=value, eax=count */
+            emit8(cg,0x89); emit8(cg,0xC1); /* mov ecx, eax  (count -> CL) */
+            emit8(cg,0x89); emit8(cg,0xD8); /* mov eax, ebx  (value -> EAX) */
+            emit8(cg,0xD3); emit8(cg,0xF8); /* sar eax, cl */
+        } else {
+            emit8(cg,0x39); emit8(cg,0xC3);
+            if (op2 == '=') { emit8(cg,0x0F); emit8(cg,0x9D); emit8(cg,0xC0); } /* setge al */
+            else { emit8(cg,0x0F); emit8(cg,0x9F); emit8(cg,0xC0); } /* setg al */
+            emit8(cg,0x0F); emit8(cg,0xB6); emit8(cg,0xC0);
+        }
     }
     else if (op == '&') { emit8(cg,0x21); emit8(cg,0xD8); } /* and eax, ebx */
     else if (op == '|') { emit8(cg,0x09); emit8(cg,0xD8); } /* or eax, ebx */

@@ -27,8 +27,8 @@ typedef int bool;
 /* -----------------------------------------------------------------------
  * Compiler limits  (Phase 2+ – full language)
  * --------------------------------------------------------------------- */
-#define MAX_TOKENS        4096   /* max tokens per source unit                  */
-#define MAX_AST_NODES     2048   /* max AST nodes per source unit               */
+#define MAX_TOKENS        2048   /* max tokens per source unit                  */
+#define MAX_AST_NODES     1024   /* max AST nodes per source unit               */
 #define MAX_CODE_BYTES    65536  /* max bytes in the generated flat binary       */
 #define MAX_DATA_BYTES    32768  /* max bytes for embedded string / data section */
 #define MAX_BINDINGS      256    /* max variables / bindings per scope           */
