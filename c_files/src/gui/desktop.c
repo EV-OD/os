@@ -21,8 +21,8 @@
 #include "string.h"
 #include "pit.h"   /* pit_get_ticks() – frame rate limiter */
 
-/* Target frame period: 3 ticks × 10 ms = ~33 fps */
-#define FRAME_TICKS  3u
+/* Target frame period: 2 ticks × 10 ms = ~50 fps */
+#define FRAME_TICKS  2u
 
 /* -------------------------------------------------------------------------
  * Internal state
@@ -169,8 +169,9 @@ void desktop_init(void)
 
 void desktop_run(void)
 {
-    mouse_state_t prev_ms = mouse_get();
+    mouse_state_t prev_ms  = mouse_get();
     unsigned int  last_frame_tick = pit_get_ticks();
+    int           bg_dirty = 1;   /* draw wallpaper on first frame */
 
     for (;;) {
         unsigned int now = pit_get_ticks();
@@ -190,6 +191,10 @@ void desktop_run(void)
             if (ms.x != prev_ms.x || ms.y != prev_ms.y ||
                 ms.buttons != prev_ms.buttons) {
                 wm_dispatch_mouse(ms.x, ms.y, ms.buttons);
+                if (lbtn && !prev_lbtn) {
+                    /* Button press can move a window → need bg redraw */
+                    bg_dirty = 1;
+                }
                 if (!lbtn && prev_lbtn) {
                     int tb_y = (int)fb_height() - TASKBAR_H;
                     if (ms.y < tb_y)
@@ -203,12 +208,24 @@ void desktop_run(void)
         if ((now - last_frame_tick) >= FRAME_TICKS) {
             last_frame_tick = now;
 
-            desktop_draw_wallpaper();
-            desktop_draw_icons();
+            /*
+             * Only redraw wallpaper when bg_dirty.
+             * Windows are always repainted on top; their content is the
+             * dominant cost so skipping wallpaper saves ~20% back-buffer
+             * writes on a static desktop.
+             */
+            if (bg_dirty) {
+                desktop_draw_wallpaper();
+                desktop_draw_icons();
+                bg_dirty = 0;
+            }
+
             wm_invalidate_all();   /* marks all windows dirty → on_paint */
             wm_paint_all();
             desktop_draw_taskbar();
             mouse_draw_cursor();
+
+            /* Flush back-buffer → MMIO (uses rep movsd fast path) */
             fb_flush();
         }
     }

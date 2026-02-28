@@ -32,6 +32,7 @@ typedef struct {
     unsigned char b_pos, b_bits;
 
     int ready;              /* 1 after successful fb_init()               */
+    int identity_layout;   /* 1 when r=16,g=8,b=0 – back pixel == hw pixel */
 } fb_state_t;
 
 static fb_state_t s_fb;
@@ -112,6 +113,11 @@ int fb_init(multiboot_info_t *mb)
     }
     memset(s_fb.back, 0, back_bytes);
 
+    /* Detect identity layout (most common: 0x00RRGGBB == HW pixel) */
+    s_fb.identity_layout = (s_fb.r_pos == 16 && s_fb.r_bits == 8 &&
+                            s_fb.g_pos ==  8 && s_fb.g_bits == 8 &&
+                            s_fb.b_pos ==  0 && s_fb.b_bits == 8);
+
     s_fb.ready = 1;
 
     log_info("[fb] %ux%u@%ubpp pitch=%u phys=0x%x back=0x%x",
@@ -158,9 +164,15 @@ color_t fb_get_pixel(int x, int y)
 void fb_fill(color_t color)
 {
     if (!s_fb.ready) return;
-    unsigned int total = s_fb.width * s_fb.height;
-    for (unsigned int i = 0; i < total; i++)
-        s_fb.back[i] = color;
+    unsigned int  total = s_fb.width * s_fb.height;
+    unsigned int *ptr   = s_fb.back;   /* local copy – asm clobbers the reg */
+    /* rep stosd writes one 32-bit dword per clock: ~4× faster than a C loop */
+    __asm__ volatile (
+        "rep stosl"
+        : "+D" (ptr), "+c" (total)
+        : "a"  (color)
+        : "memory"
+    );
 }
 
 void fb_blit(int dst_x, int dst_y, int w, int h,
@@ -199,25 +211,49 @@ void fb_flush_rect(int x, int y, int w, int h)
     int y0 = fb_max(y, 0);
     int x1 = fb_min(x + w, (int)s_fb.width);
     int y1 = fb_min(y + h, (int)s_fb.height);
+    int cols = x1 - x0;
+    if (cols <= 0) return;
 
-    for (int row = y0; row < y1; row++) {
-        unsigned char *dst_row = s_fb.front
-            + (unsigned int)row * s_fb.pitch
-            + (unsigned int)x0 * (s_fb.bpp / 8u);
-        const unsigned int *src_row = s_fb.back
-            + (unsigned int)row * s_fb.width
-            + (unsigned int)x0;
-
-        int cols = x1 - x0;
-        /* For 32-bpp we can use a fast word-by-word copy; remap channels. */
-        for (int col = 0; col < cols; col++) {
-            unsigned int hw = color_to_hw(src_row[col]);
-            unsigned char *p = dst_row + col * 4;
-            /* Little-endian write */
-            p[0] = (unsigned char)( hw        & 0xFF);
-            p[1] = (unsigned char)((hw >> 8 ) & 0xFF);
-            p[2] = (unsigned char)((hw >> 16) & 0xFF);
-            p[3] = 0;
+    if (s_fb.identity_layout) {
+        /*
+         * Fast path: back-buffer pixel == hardware pixel (0x00RRGGBB).
+         * Use "rep movsd" to copy an entire scanline in one burst.
+         * Each iteration moves one 32-bit dword (1 pixel), so 'count' = cols.
+         * This replaces cols×4 individual byte-writes with a single hardware
+         * string instruction, giving ~4× better throughput to MMIO.
+         */
+        for (int row = y0; row < y1; row++) {
+            unsigned int       *dst = (unsigned int *)(s_fb.front
+                + (unsigned int)row * s_fb.pitch)
+                + (unsigned int)x0;
+            const unsigned int *src = s_fb.back
+                + (unsigned int)row * s_fb.width
+                + (unsigned int)x0;
+            int cnt = cols;
+            __asm__ volatile (
+                "rep movsl"
+                : "+D" (dst), "+S" (src), "+c" (cnt)
+                :
+                : "memory"
+            );
+        }
+    } else {
+        /* Slow path: non-standard channel order – remap each pixel. */
+        for (int row = y0; row < y1; row++) {
+            unsigned char      *dst_row = s_fb.front
+                + (unsigned int)row * s_fb.pitch
+                + (unsigned int)x0 * (s_fb.bpp / 8u);
+            const unsigned int *src_row = s_fb.back
+                + (unsigned int)row * s_fb.width
+                + (unsigned int)x0;
+            for (int col = 0; col < cols; col++) {
+                unsigned int hw = color_to_hw(src_row[col]);
+                unsigned char *p = dst_row + col * 4;
+                p[0] = (unsigned char)( hw        & 0xFF);
+                p[1] = (unsigned char)((hw >>  8) & 0xFF);
+                p[2] = (unsigned char)((hw >> 16) & 0xFF);
+                p[3] = 0;
+            }
         }
     }
 }
