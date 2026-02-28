@@ -227,6 +227,12 @@ int fat32_list_dir(fat32_context_t *ctx,
                 return -1;
             }
         } else {
+            /* Update block_lba to reflect the current cluster so that
+             * fat_dir_loc_t::sector is correct for every directory cluster,
+             * not just the first one.  Without this, loc.sector is stale
+             * for entries in the 2nd+ cluster and fat32_update_dir_entry
+             * reads/writes the wrong sector (silent delete failure). */
+            block_lba = fat32_cluster_to_lba(ctx, cur_cluster);
             if (fat32_read_cluster(ctx, cur_cluster, dir_buf) < 0) {
                 kfree(dir_buf);
                 return -1;
