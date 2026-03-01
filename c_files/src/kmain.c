@@ -183,10 +183,10 @@ void kmain(unsigned int eax, unsigned int ebx)
             {
                 process_t *comp  = process_create("compositor",
                                                   gui_compositor_task, 0);
-                process_t *shell = process_create("shell",
-                                                  gui_shell_task, 5);
+                // process_t *shell = process_create("shell",
+                //                                   gui_shell_task, 5);
                 if (comp)  sched_add(comp);
-                if (shell) sched_add(shell);
+                // if (shell) sched_add(shell);
             }
             log_info("[kmain] entering GUI mode (CFS scheduler)");
             /* Flush any PS/2 init residue from the keyboard ring buffer
