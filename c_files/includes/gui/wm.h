@@ -73,9 +73,10 @@ struct wm_window {
 
     /* --- Internal (do not touch) --------------------------------------- */
     int _stack_idx;         /**< Position in wm_stack[]; managed by the WM.      */
+    int creation_idx;       /**< Monotonically-increasing birth counter. Never changes. */
     int no_drag;            /**< Non-zero: disables title-bar drag for this win.  */
     int owner_pid;          /**< PID of the process that owns this window (0=none). */
-    void *userdata;         /**< Optional per-window private pointer (e.g. gui_term_state_t *). */
+    void *userdata;         /**< Optional per-window private pointer.              */
 
     /* --- Drawing state ------------------------------------------------- */
     unsigned int pen_color; /**< Current stroke colour (used by line/rect/circle). */

@@ -89,4 +89,22 @@ void desktop_spawn_terminal(void);
  */
 void desktop_open_rxt(void);
 
+/**
+ * Add a path-based desktop icon whose double-click loads path as a .rox program.
+ * The label is copied internally; the icon position is chosen automatically.
+ */
+void desktop_add_icon_path(const char *label, const char *path);
+
+/**
+ * Persist the current path-based icons to /etc/desktop.conf.
+ * Built-in icons (Terminal, RXT) are NOT saved – they are registered at boot.
+ */
+void desktop_save_config(void);
+
+/**
+ * Load /etc/desktop.conf and register the icons found there.
+ * Called from desktop_init() after the built-in icons have been registered.
+ */
+void desktop_load_config(void);
+
 #endif /* GUI_DESKTOP_H */

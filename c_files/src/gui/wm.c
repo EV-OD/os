@@ -25,6 +25,7 @@
 
 static wm_window_t *wm_stack[WM_MAX_WINDOWS];
 static int          wm_count = 0;
+static int          wm_creation_counter = 0;
 
 /* Drag state */
 static wm_window_t *drag_win    = (void *)0;
@@ -89,8 +90,9 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     win->on_paint   = (void *)0;
     win->on_key     = (void *)0;
     win->on_mouse   = (void *)0;
-    win->_stack_idx = 0;
-    win->pen_color  = 0xFFFFFF;  /* default stroke = white */
+    win->_stack_idx  = 0;
+    win->creation_idx = wm_creation_counter++;
+    win->pen_color   = 0xFFFFFF;  /* default stroke = white */
     win->bg_color   = 0x001020;  /* default bg = dark navy  */
     win->owner_pid  = 0;
 

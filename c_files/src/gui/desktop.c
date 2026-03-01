@@ -26,6 +26,7 @@
 #include "terminal.h"
 #include "shell.h"
 #include "rox.h"   /* pit_get_ticks() – frame rate limiter */
+#include "vfs.h"
 
 /* Target frame period: 2 ticks × 10 ms = ~50 fps */
 #define FRAME_TICKS  2u
@@ -41,8 +42,10 @@
 
 typedef struct {
     int  x, y;
-    const char *label;
-    void (*on_click)(void);
+    char label_buf[32];          /* owned copy of the label */
+    const char *label;           /* points into label_buf   */
+    char path[256];              /* .rox path; empty for built-in callbacks */
+    void (*on_click)(void);      /* built-in callback, or NULL for path icons */
     int  used;
 } icon_slot_t;
 
@@ -52,6 +55,18 @@ static int         s_icon_count = 0;
 /* Double-click tracking */
 static int          s_last_click_icon = -1;
 static unsigned int s_last_click_tick = 0;
+
+/* Trampoline state for path-based icon launch (one at a time) */
+static char s_icon_launch_path[256];
+
+static void icon_rox_task(void)
+{
+    char lpath[256];
+    int  i;
+    for (i = 0; i < 255; i++) lpath[i] = s_icon_launch_path[i];
+    lpath[255] = '\0';
+    rox_load_and_run(lpath, 0, (void *)0);
+}
 
 /* -------------------------------------------------------------------------
  * Terminal spawn state
@@ -146,7 +161,6 @@ void desktop_draw_wallpaper(void)
 
 void desktop_draw_taskbar(void)
 {
-    int i;
     int w   = (int)fb_width();
     int ty  = (int)fb_height() - TASKBAR_H;
 
@@ -161,17 +175,32 @@ void desktop_draw_taskbar(void)
     font_draw_str(10, ty + (TASKBAR_H - FONT_H) / 2, "START",
                   COLOR_WHITE, COLOR_TRANSPARENT);
 
-    /* Window buttons – one per open window */
+    /* Window buttons – one per open window, sorted by creation order */
     {
         int nx = TASKBAR_BTN_X0;
         int n  = wm_get_count();
         wm_window_t *focused = wm_focused();
 
-        for (i = 0; i < n; i++) {
-            wm_window_t *win = wm_get_at(i);
-            if (!win) { nx += TASKBAR_BTN_W + 4; continue; }
+        /* Build a local sorted array (insertion-sort by creation_idx) */
+        wm_window_t *sorted[WM_MAX_WINDOWS];
+        int sc = 0, si, sj;
+        for (si = 0; si < n; si++) {
+            wm_window_t *win = wm_get_at(si);
+            if (win) sorted[sc++] = win;
+        }
+        /* insertion sort ascending creation_idx */
+        for (si = 1; si < sc; si++) {
+            wm_window_t *key = sorted[si];
+            sj = si - 1;
+            while (sj >= 0 && sorted[sj]->creation_idx > key->creation_idx) {
+                sorted[sj + 1] = sorted[sj];
+                sj--;
+            }
+            sorted[sj + 1] = key;
+        }
 
-            /* Stop if we run out of taskbar space */
+        for (si = 0; si < sc; si++) {
+            wm_window_t *win = sorted[si];
             if (nx + TASKBAR_BTN_W > w - 4) break;
 
             int is_focused = (win == focused);
@@ -185,7 +214,7 @@ void desktop_draw_taskbar(void)
                                      : COLOR_RGB(0x44,0x44,0x66));
 
             /* Truncated title (max 14 chars) */
-            char trunc[16];
+            char trunc[17];
             int  tl = 0;
             while (win->title[tl] && tl < 14) { trunc[tl] = win->title[tl]; tl++; }
             if (win->title[tl]) { trunc[tl++] = '.'; trunc[tl++] = '.'; }
@@ -232,13 +261,111 @@ static void desktop_draw_icons(void)
 void desktop_add_icon(int x, int y, const char *label,
                       void (*on_click)(void))
 {
+    int i;
     if (s_icon_count >= MAX_ICONS) return;
-    s_icons[s_icon_count].x        = x;
-    s_icons[s_icon_count].y        = y;
-    s_icons[s_icon_count].label    = label;
-    s_icons[s_icon_count].on_click = on_click;
-    s_icons[s_icon_count].used     = 1;
+    icon_slot_t *ic = &s_icons[s_icon_count];
+    ic->x        = x;
+    ic->y        = y;
+    ic->on_click = on_click;
+    ic->path[0]  = '\0';
+    /* Copy label into owned buffer */
+    for (i = 0; i < 31 && label && label[i]; i++) ic->label_buf[i] = label[i];
+    ic->label_buf[i] = '\0';
+    ic->label    = ic->label_buf;
+    ic->used     = 1;
     s_icon_count++;
+}
+
+void desktop_add_icon_path(const char *label, const char *path)
+{
+    int i;
+    if (s_icon_count >= MAX_ICONS) return;
+
+    /* Auto-position: two columns of icons on the left side */
+    int col  = (s_icon_count / 8) & 1;   /* column 0 or 1 */
+    int row  = s_icon_count % 8;
+    int x    = 16 + col * 72;
+    int y    = 16 + row * 72;
+
+    icon_slot_t *ic = &s_icons[s_icon_count];
+    ic->x        = x;
+    ic->y        = y;
+    ic->on_click = (void *)0;
+    for (i = 0; i < 255 && path && path[i]; i++) ic->path[i] = path[i];
+    ic->path[i] = '\0';
+    for (i = 0; i < 31 && label && label[i]; i++) ic->label_buf[i] = label[i];
+    ic->label_buf[i] = '\0';
+    ic->label  = ic->label_buf;
+    ic->used   = 1;
+    s_icon_count++;
+}
+
+/* -------------------------------------------------------------------------
+ * desktop_save_config / desktop_load_config  –  /etc/desktop.conf
+ *
+ * Format (one line per icon):  icon <label> <path>
+ * ------------------------------------------------------------------------- */
+
+void desktop_save_config(void)
+{
+    int i;
+    int fd = vfs_open("/etc/desktop.conf",
+                      VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd < 0) return;
+    for (i = 0; i < s_icon_count; i++) {
+        icon_slot_t *ic = &s_icons[i];
+        if (!ic->used || ic->path[0] == '\0') continue;  /* skip built-ins */
+        vfs_write(fd, "icon ", 5);
+        vfs_write(fd, ic->label_buf, strlen(ic->label_buf));
+        vfs_write(fd, " ", 1);
+        vfs_write(fd, ic->path, strlen(ic->path));
+        vfs_write(fd, "\n", 1);
+    }
+    vfs_close(fd);
+}
+
+void desktop_load_config(void)
+{
+    int fd = vfs_open("/etc/desktop.conf", VFS_O_RDONLY);
+    if (fd < 0) return;
+
+    char buf[2048];
+    int  total = 0, n;
+    while ((n = vfs_read(fd, buf + total,
+                         (int)sizeof(buf) - total - 1)) > 0)
+        total += n;
+    vfs_close(fd);
+    buf[total] = '\0';
+
+    /* Parse lines: "icon <label> <path>" */
+    int i = 0;
+    while (i < total) {
+        /* Skip whitespace/blank lines */
+        while (i < total && (buf[i] == '\n' || buf[i] == '\r' || buf[i] == ' '))
+            i++;
+        if (i >= total) break;
+
+        /* Read keyword */
+        if (buf[i] != 'i') { while (i < total && buf[i] != '\n') i++; continue; }
+        i += 5; /* skip 'icon ' */
+        if (i >= total) break;
+
+        /* Read label (up to first space) */
+        char label[32]; int li = 0;
+        while (i < total && buf[i] != ' ' && buf[i] != '\n' && li < 31)
+            label[li++] = buf[i++];
+        label[li] = '\0';
+        if (i < total && buf[i] == ' ') i++;
+
+        /* Read path (to newline) */
+        char path[256]; int pi = 0;
+        while (i < total && buf[i] != '\n' && buf[i] != '\r' && pi < 255)
+            path[pi++] = buf[i++];
+        path[pi] = '\0';
+
+        if (li > 0 && pi > 0)
+            desktop_add_icon_path(label, path);
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -283,17 +410,24 @@ static void check_icon_clicks(int mx, int my, unsigned int now)
             if (s_last_click_icon == i &&
                 (now - s_last_click_tick) < DBLCLICK_TICKS) {
                 /* Double-click – fire the action */
-                if (ic->on_click) ic->on_click();
-                s_last_click_icon = -1;   /* reset so triple-click is not a second dblclick */
+                if (ic->on_click) {
+                    ic->on_click();
+                } else if (ic->path[0]) {
+                    /* Copy path then spawn task */
+                    int k;
+                    for (k = 0; k < 255; k++) s_icon_launch_path[k] = ic->path[k];
+                    s_icon_launch_path[255] = '\0';
+                    process_t *p = process_create("icon-rox", icon_rox_task, 5);
+                    if (p) sched_add(p);
+                }
+                s_last_click_icon = -1;
             } else {
-                /* First click – just record */
                 s_last_click_icon = i;
                 s_last_click_tick = now;
             }
             return;
         }
     }
-    /* Clicked on blank desktop – reset double-click state */
     s_last_click_icon = -1;
 }
 
@@ -310,6 +444,9 @@ void desktop_init(void)
     fb_flush();
     log_info("[desktop] desktop initialised (%ux%u)",
              fb_width(), fb_height());
+
+    /* Restore icons saved by previous session */
+    desktop_load_config();
 }
 
 /* -------------------------------------------------------------------------

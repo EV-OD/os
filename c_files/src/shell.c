@@ -32,6 +32,7 @@
 #include "multiboot.h"
 #include "gui/gui_init.h"
 #include "gui/mu_backend.h"
+#include "gui/desktop.h"
 #include "process.h"
 #include "sched.h"
 #endif
@@ -81,6 +82,7 @@ static int cmd_rosc(int argc, char **argv);
 static int cmd_sample(int argc, char **argv);
 static int cmd_microui(int argc, char **argv);
 static int cmd_setup(int argc, char **argv);
+static int cmd_desktop(int argc, char **argv);
 
 static const builtin_cmd_t builtins[] = {
     { "help",   "Show available commands",          cmd_help   },
@@ -102,6 +104,7 @@ static const builtin_cmd_t builtins[] = {
     { "sample", "Create sample .ros program (try: sample list)", cmd_sample },
     { "microui","Launch microui demo window",        cmd_microui},
     { "setup",  "Install rxt editor to /bin",       cmd_setup  },
+    { "desktop","Manage desktop icons (desktop add <name|path.rox>)", cmd_desktop },
     { (void *)0, (void *)0, (void *)0 } /* sentinel */
 };
 
@@ -1989,4 +1992,78 @@ static int cmd_setup(int argc, char **argv)
     puts_color("[setup] rxt installed at /bin/rxt.rox\n", COLOR_LIGHT_GREEN);
     puts_color("  Usage: rxt <filename>\n", COLOR_WHITE);
     return 0;
+}
+
+/* --- desktop ----------------------------------------------------------- */
+static int cmd_desktop(int argc, char **argv)
+{
+    if (argc < 3 || strcmp(argv[1], "add") != 0) {
+        puts("Usage: desktop add <name|path.rox>\n"
+             "  name      looks for /bin/<name>.rox\n"
+             "  path.rox  uses the exact path\n");
+        return -1;
+    }
+
+    const char *arg = argv[2];
+    char path[256];
+    int  i;
+
+    /* Resolve the path */
+    if (arg[0] == '.' || arg[0] == '/') {
+        /* Already a path – normalise through resolve_path */
+        resolve_path(arg, path, sizeof(path));
+    } else {
+        /* Bare name → /bin/<name>.rox */
+        path[0] = '/';
+        path[1] = 'b';
+        path[2] = 'i';
+        path[3] = 'n';
+        path[4] = '/';
+        path[5] = '\0';
+        int plen = 5;
+        for (i = 0; arg[i] && plen < 250; i++)
+            path[plen++] = arg[i];
+        path[plen] = '\0';
+        /* Append .rox if not already present */
+        int nlen = plen;
+        if (nlen < 4 ||
+            path[nlen-4] != '.' || path[nlen-3] != 'r' ||
+            path[nlen-2] != 'o' || path[nlen-1] != 'x') {
+            path[plen+0] = '.';
+            path[plen+1] = 'r';
+            path[plen+2] = 'o';
+            path[plen+3] = 'x';
+            path[plen+4] = '\0';
+        }
+    }
+
+    /* Derive a short label from the last component, without extension */
+    char label[32];
+    int  start = 0;
+    int  plen2 = 0;
+    while (path[plen2]) plen2++;
+    /* Walk backwards to find '/'' */
+    int li = plen2 - 1;
+    while (li >= 0 && path[li] != '/') li--;
+    li++; /* first char of basename */
+    int lw = 0;
+    while (path[li + lw] && path[li + lw] != '.' && lw < 31) {
+        label[lw] = path[li + lw];
+        lw++;
+    }
+    label[lw] = '\0';
+    if (lw == 0) {
+        /* Fall back to user-supplied arg */
+        for (lw = 0; arg[lw] && lw < 31; lw++) label[lw] = arg[lw];
+        label[lw] = '\0';
+    }
+
+    desktop_add_icon_path(label, path);
+    desktop_save_config();
+
+    puts_color("[desktop] icon '", COLOR_LIGHT_CYAN);
+    puts_color(label, COLOR_WHITE);
+    puts_color("' added.\n", COLOR_LIGHT_CYAN);
+    return 0;
+    (void)start;
 }
