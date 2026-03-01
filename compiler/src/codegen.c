@@ -315,8 +315,8 @@ static void emit_stmt(Codegen *cg, AstNode *n) {
                 /* Print integer -> invoke runtime helper */
                 emit_expr(cg, n->expr);
                 emit_push_eax(cg);
-                /* helper is always at code_offset 0, so call it */
-                emit8(cg, 0xE8); emit32(cg, 0 - (cg->code_len + 4));
+                /* call print_int helper at its recorded code offset */
+                emit8(cg, 0xE8); emit32(cg, cg->print_int_offset - (cg->code_len + 4));
                 emit8(cg, 0x83); emit8(cg, 0xC4); emit8(cg, 4); /* cleanup */
                 if (n->type == AST_PRINTLN) {
                     /* call print_newline_helper at code_offset ~60 (we'll place it right after print_int) */
@@ -464,21 +464,83 @@ static void emit_stmt(Codegen *cg, AstNode *n) {
    ... div 10 logic. 
    To save space, just raw hex or very small loop */
 static void emit_print_int_helper(Codegen *cg) {
-    /* 
-    push ebp (55)
-    mov ebp, esp (89 e5)
-    sub esp, 16 (83 ec 10)
-    mov eax, [ebp+8] (8b 45 08)
-    call hex_fmt (or inline)
-    */
-    /* simplified inline hex formatter */
+    /*
+     * Decimal i32 printer  (sys_write = 1, Linux/RosOS i386 ABI)
+     *
+     * void print_int(int n)   -- called cdecl, [ebp+8] = n
+     *
+     * Layout (73 bytes):
+     *  [0]  prologue
+     *  [6]  load arg
+     *  [9]  test zero → [13] zero path → jmp [57]
+     *  [27] nonzero: build decimal string backwards into [ebp-16..ebp-1]
+     *  [52] set up sys_write args from loop results
+     *  [57] sys_write(1, buf, len) → epilogue → ret
+     *
+     *  Disassembly:
+     *   55              push ebp
+     *   89 E5           mov  ebp, esp
+     *   83 EC 10        sub  esp, 16
+     *   8B 45 08        mov  eax, [ebp+8]       ; n
+     *   85 C0           test eax, eax
+     *   75 0E           jnz  .nonzero
+     *   C6 45 FF 30     mov  byte [ebp-1], '0'
+     *   8D 4D FF        lea  ecx, [ebp-1]
+     *   BA 01 00 00 00  mov  edx, 1
+     *   EB 1E           jmp  .do_write
+     *  .nonzero:
+     *   BB 0A 00 00 00  mov  ebx, 10
+     *   8D 7D FF        lea  edi, [ebp-1]        ; fill ptr (backwards)
+     *   31 C9           xor  ecx, ecx            ; digit count
+     *  .loop:
+     *   31 D2           xor  edx, edx
+     *   F7 F3           div  ebx                 ; eax=q, edx=r
+     *   83 C2 30        add  edx, 0x30
+     *   88 17           mov  [edi], dl
+     *   4F              dec  edi
+     *   41              inc  ecx
+     *   85 C0           test eax, eax
+     *   75 F1           jnz  .loop
+     *   89 CA           mov  edx, ecx            ; length
+     *   8D 4F 01        lea  ecx, [edi+1]        ; buf start
+     *  .do_write:
+     *   B8 01 00 00 00  mov  eax, 1              ; sys_write
+     *   BB 01 00 00 00  mov  ebx, 1              ; fd=stdout
+     *   CD 80           int  0x80
+     *   89 EC           mov  esp, ebp
+     *   5D              pop  ebp
+     *   C3              ret
+     */
     u8 code[] = {
-        0x55, 0x89, 0xE5, 0x83, 0xEC, 0x10, 0x8B, 0x45, 0x08, 0xB9, 0x08, 0x00, 
-        0x00, 0x00, 0x8D, 0x7D, 0xFF, 0x89, 0xC2, 0x83, 0xE2, 0x0F, 0x83, 0xFA, 
-        0x0A, 0x7C, 0x03, 0x83, 0xC2, 0x07, 0x83, 0xC2, 0x30, 0x88, 0x17, 0x4F, 
-        0xC1, 0xE8, 0x04, 0x49, 0x75, 0xE9, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xBB, 
-        0x01, 0x00, 0x00, 0x00, 0x8D, 0x4D, 0xF8, 0xBA, 0x08, 0x00, 0x00, 0x00, 
-        0xCD, 0x80, 0x89, 0xEC, 0x5D, 0xC3
+        /* 0  */ 0x55,                           /* push ebp           */
+        /* 1  */ 0x89, 0xE5,                     /* mov ebp, esp       */
+        /* 3  */ 0x83, 0xEC, 0x10,               /* sub esp, 16        */
+        /* 6  */ 0x8B, 0x45, 0x08,               /* mov eax, [ebp+8]   */
+        /* 9  */ 0x85, 0xC0,                     /* test eax, eax      */
+        /* 11 */ 0x75, 0x0E,                     /* jnz .nonzero (+14) */
+        /* 13 */ 0xC6, 0x45, 0xFF, 0x30,         /* mov [ebp-1],'0'    */
+        /* 17 */ 0x8D, 0x4D, 0xFF,               /* lea ecx,[ebp-1]    */
+        /* 20 */ 0xBA, 0x01, 0x00, 0x00, 0x00,   /* mov edx, 1         */
+        /* 25 */ 0xEB, 0x1E,                     /* jmp .do_write (+30)*/
+        /* 27 */ 0xBB, 0x0A, 0x00, 0x00, 0x00,  /* mov ebx, 10        */
+        /* 32 */ 0x8D, 0x7D, 0xFF,               /* lea edi,[ebp-1]    */
+        /* 35 */ 0x31, 0xC9,                     /* xor ecx, ecx       */
+        /* 37 */ 0x31, 0xD2,                     /* xor edx, edx       */
+        /* 39 */ 0xF7, 0xF3,                     /* div ebx            */
+        /* 41 */ 0x83, 0xC2, 0x30,               /* add edx, 0x30      */
+        /* 44 */ 0x88, 0x17,                     /* mov [edi], dl      */
+        /* 46 */ 0x4F,                           /* dec edi            */
+        /* 47 */ 0x41,                           /* inc ecx            */
+        /* 48 */ 0x85, 0xC0,                     /* test eax, eax      */
+        /* 50 */ 0x75, 0xF1,                     /* jnz .loop (-15)    */
+        /* 52 */ 0x89, 0xCA,                     /* mov edx, ecx       */
+        /* 54 */ 0x8D, 0x4F, 0x01,               /* lea ecx,[edi+1]    */
+        /* 57 */ 0xB8, 0x01, 0x00, 0x00, 0x00,  /* mov eax, 1         */
+        /* 62 */ 0xBB, 0x01, 0x00, 0x00, 0x00,  /* mov ebx, 1 (stdout)*/
+        /* 67 */ 0xCD, 0x80,                     /* int 0x80           */
+        /* 69 */ 0x89, 0xEC,                     /* mov esp, ebp       */
+        /* 71 */ 0x5D,                           /* pop ebp            */
+        /* 72 */ 0xC3                            /* ret                */
     };
     for (unsigned int i=0; i<sizeof(code); i++) emit8(cg, code[i]);
 }
@@ -488,6 +550,7 @@ int codegen_run(Codegen *cg, AstNode *prog) {
     int jmp_main = emit_jmp_fwd(cg);
 
     /* 2. Runtime helpers */
+    cg->print_int_offset = cg->code_len;   /* record helper offset BEFORE emitting */
     emit_print_int_helper(cg);
 
     /* 3. Global functions */

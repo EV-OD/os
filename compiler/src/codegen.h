@@ -167,6 +167,9 @@ typedef struct {
     /* --- Entry offset (for ROX header) ------------------------------ */
     int  entry_offset;
 
+    /* --- Offset of print_int runtime helper in code[] --------------- */
+    int  print_int_offset;
+
     int  had_error;
 } Codegen;
 
