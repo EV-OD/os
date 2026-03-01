@@ -1,0 +1,206 @@
+// mu_demo.ros – A microui-style dark-themed GUI demo
+// Written in ROX (RandomOS's own programming language)
+// Demonstrates panels, buttons, labels, progress bar, and keyboard interaction
+// Uses only the built-in gui_* syscalls
+
+fn draw_button(win: i32, x: i32, y: i32, w: i32, h: i32, label: str, hover: i32) {
+    // Button background
+    if hover == 1 {
+        gui_pen(win, 0x5F5F5F)
+    } else {
+        gui_pen(win, 0x4B4B4B)
+    }
+    gui_fill_rect(win, x, y, w, h)
+
+    // Button border
+    gui_pen(win, 0x191919)
+    gui_rect(win, x, y, w, h)
+
+    // Button label (centered-ish)
+    gui_text(win, x + 8, y + 6, label, 0xE6E6E6)
+}
+
+fn draw_checkbox(win: i32, x: i32, y: i32, label: str, checked: i32) {
+    // Box
+    gui_pen(win, 0x1E1E1E)
+    gui_fill_rect(win, x, y, 16, 16)
+    gui_pen(win, 0x191919)
+    gui_rect(win, x, y, 16, 16)
+
+    // Check mark
+    if checked == 1 {
+        gui_text(win, x + 4, y + 4, "*", 0xE6E6E6)
+    }
+
+    // Label
+    gui_text(win, x + 22, y + 4, label, 0xE6E6E6)
+}
+
+fn draw_progress(win: i32, x: i32, y: i32, w: i32, h: i32, value: i32, max_val: i32) {
+    // Background
+    gui_pen(win, 0x1E1E1E)
+    gui_fill_rect(win, x, y, w, h)
+
+    // Filled portion
+    let fill_w: i32 = (value * w) / max_val
+    if fill_w > w {
+        fill_w = w
+    }
+    gui_pen(win, 0x2255AA)
+    gui_fill_rect(win, x, y, fill_w, h)
+
+    // Border
+    gui_pen(win, 0x191919)
+    gui_rect(win, x, y, w, h)
+}
+
+fn draw_panel(win: i32, x: i32, y: i32, w: i32, h: i32) {
+    gui_pen(win, 0x323232)
+    gui_fill_rect(win, x, y, w, h)
+    gui_pen(win, 0x191919)
+    gui_rect(win, x, y, w, h)
+}
+
+fn main() {
+    let win: i32 = gui_window(60, 40, 400, 310, "ROX UI Demo")
+    let c: i32 = 0
+    mut counter: i32 = 0
+    mut checked: i32 = 0
+    mut progress: i32 = 25
+    mut selected: i32 = 0
+    mut redraw: i32 = 1
+
+    while c != 113 {
+        if redraw == 1 {
+            // Clear canvas with dark background
+            gui_fill(win, 0x2E2E2E)
+
+            // Title label
+            gui_text(win, 10, 8, "microui-style Demo (ROX)", 0xE6E6E6)
+
+            // Separator line
+            gui_pen(win, 0x191919)
+            gui_line(win, 10, 22, 380, 22)
+
+            // --- Buttons panel ---
+            draw_panel(win, 8, 30, 380, 50)
+            gui_text(win, 14, 36, "Buttons:", 0xA0A0A0)
+
+            // Highlight the selected button
+            if selected == 0 {
+                draw_button(win, 80, 36, 90, 20, "Click [1]", 1)
+            } else {
+                draw_button(win, 80, 36, 90, 20, "Click [1]", 0)
+            }
+
+            if selected == 1 {
+                draw_button(win, 180, 36, 90, 20, "Reset [2]", 1)
+            } else {
+                draw_button(win, 180, 36, 90, 20, "Reset [2]", 0)
+            }
+
+            // Counter display
+            if counter == 0 {
+                gui_text(win, 280, 42, "Count: 0", 0xE6E6E6)
+            }
+            if counter == 1 {
+                gui_text(win, 280, 42, "Count: 1", 0xE6E6E6)
+            }
+            if counter == 2 {
+                gui_text(win, 280, 42, "Count: 2", 0xE6E6E6)
+            }
+            if counter == 3 {
+                gui_text(win, 280, 42, "Count: 3", 0xE6E6E6)
+            }
+            if counter == 4 {
+                gui_text(win, 280, 42, "Count: 4", 0xE6E6E6)
+            }
+            if counter == 5 {
+                gui_text(win, 280, 42, "Count: 5", 0xE6E6E6)
+            }
+            if counter > 5 {
+                gui_text(win, 280, 42, "Count: 5+", 0xE6E6E6)
+            }
+
+            // Status line at bottom of buttons panel
+            gui_text(win, 14, 60, "Press 1/2 to click buttons", 0x606060)
+
+            // --- Checkbox panel ---
+            draw_panel(win, 8, 86, 380, 40)
+            draw_checkbox(win, 14, 96, "Enable feature [space]", checked)
+
+            // --- Progress panel ---
+            draw_panel(win, 8, 132, 380, 50)
+            gui_text(win, 14, 138, "Progress (A/D to adjust):", 0xA0A0A0)
+            draw_progress(win, 14, 156, 368, 16, progress, 100)
+
+            // --- Info panel ---
+            draw_panel(win, 8, 188, 380, 72)
+            gui_text(win, 14, 194, "Keyboard Controls:", 0xA0A0A0)
+            gui_text(win, 14, 210, "1 = Click  2 = Reset  Space = Toggle", 0x808080)
+            gui_text(win, 14, 226, "A/D = Progress  Q = Quit", 0x808080)
+            gui_text(win, 14, 242, "Tab = Switch button focus", 0x808080)
+
+            gui_flush(win)
+            redraw = 0
+        }
+
+        c = gui_wait(win)
+
+        // Handle key: '1' = click button
+        if c == 49 {
+            selected = 0
+            counter = counter + 1
+            redraw = 1
+        }
+
+        // Handle key: '2' = reset
+        if c == 50 {
+            selected = 1
+            counter = 0
+            progress = 25
+            checked = 0
+            redraw = 1
+        }
+
+        // Handle key: space = toggle checkbox
+        if c == 32 {
+            if checked == 0 {
+                checked = 1
+            } else {
+                checked = 0
+            }
+            redraw = 1
+        }
+
+        // Handle key: 'a' = decrease progress
+        if c == 97 {
+            progress = progress - 5
+            if progress < 0 {
+                progress = 0
+            }
+            redraw = 1
+        }
+
+        // Handle key: 'd' = increase progress
+        if c == 100 {
+            progress = progress + 5
+            if progress > 100 {
+                progress = 100
+            }
+            redraw = 1
+        }
+
+        // Handle key: tab = switch focus
+        if c == 9 {
+            if selected == 0 {
+                selected = 1
+            } else {
+                selected = 0
+            }
+            redraw = 1
+        }
+    }
+
+    gui_close(win)
+}

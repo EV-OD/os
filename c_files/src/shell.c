@@ -30,6 +30,9 @@
 #ifdef GUI_MODE
 #include "multiboot.h"
 #include "gui/gui_init.h"
+#include "gui/mu_backend.h"
+#include "process.h"
+#include "sched.h"
 #endif
 
 /* -------------------------------------------------------------------------
@@ -75,6 +78,7 @@ static int cmd_uname(int argc, char **argv);
 static int cmd_whoami(int argc, char **argv);
 static int cmd_rosc(int argc, char **argv);
 static int cmd_sample(int argc, char **argv);
+static int cmd_microui(int argc, char **argv);
 
 static const builtin_cmd_t builtins[] = {
     { "help",   "Show available commands",          cmd_help   },
@@ -94,6 +98,7 @@ static const builtin_cmd_t builtins[] = {
     { "whoami", "Print current user",               cmd_whoami },
     { "rosc",   "Compile .ros source to .rox",      cmd_rosc   },
     { "sample", "Create sample .ros program (try: sample list)", cmd_sample },
+    { "microui","Launch microui demo window",        cmd_microui},
     { (void *)0, (void *)0, (void *)0 } /* sentinel */
 };
 
@@ -1357,6 +1362,178 @@ struct sample_entry {
     const char *desc;
 };
 
+static const char sample_mu[] =
+    "// mu_demo.ros - A microui-style dark-themed GUI demo\n"
+    "// Written in ROX (RandomOS's own programming language)\n"
+    "// Demonstrates panels, buttons, labels, progress bar, and keyboard interaction\n"
+    "// Uses only the built-in gui_* syscalls\n"
+    "\n"
+    "fn draw_button(win: i32, x: i32, y: i32, w: i32, h: i32, label: str, hover: i32) {\n"
+    "    // Button background\n"
+    "    if hover == 1 {\n"
+    "        gui_pen(win, 0x5F5F5F)\n"
+    "    } else {\n"
+    "        gui_pen(win, 0x4B4B4B)\n"
+    "    }\n"
+    "    gui_fill_rect(win, x, y, w, h)\n"
+    "\n"
+    "    // Button border\n"
+    "    gui_pen(win, 0x191919)\n"
+    "    gui_rect(win, x, y, w, h)\n"
+    "\n"
+    "    // Button label (centered-ish)\n"
+    "    gui_text(win, x + 8, y + 6, label, 0xE6E6E6)\n"
+    "}\n"
+    "\n"
+    "fn draw_checkbox(win: i32, x: i32, y: i32, label: str, checked: i32) {\n"
+    "    // Box\n"
+    "    gui_pen(win, 0x1E1E1E)\n"
+    "    gui_fill_rect(win, x, y, 16, 16)\n"
+    "    gui_pen(win, 0x191919)\n"
+    "    gui_rect(win, x, y, 16, 16)\n"
+    "\n"
+    "    // Check mark\n"
+    "    if checked == 1 {\n"
+    "        gui_text(win, x + 4, y + 4, \"*\", 0xE6E6E6)\n"
+    "    }\n"
+    "\n"
+    "    // Label\n"
+    "    gui_text(win, x + 22, y + 4, label, 0xE6E6E6)\n"
+    "}\n"
+    "\n"
+    "fn draw_progress(win: i32, x: i32, y: i32, w: i32, h: i32, value: i32, max_val: i32) {\n"
+    "    // Background\n"
+    "    gui_pen(win, 0x1E1E1E)\n"
+    "    gui_fill_rect(win, x, y, w, h)\n"
+    "\n"
+    "    // Filled portion\n"
+    "    let fill_w: i32 = (value * w) / max_val\n"
+    "    if fill_w > w {\n"
+    "        fill_w = w\n"
+    "    }\n"
+    "    gui_pen(win, 0x2255AA)\n"
+    "    gui_fill_rect(win, x, y, fill_w, h)\n"
+    "\n"
+    "    // Border\n"
+    "    gui_pen(win, 0x191919)\n"
+    "    gui_rect(win, x, y, w, h)\n"
+    "}\n"
+    "\n"
+    "fn draw_panel(win: i32, x: i32, y: i32, w: i32, h: i32) {\n"
+    "    gui_pen(win, 0x323232)\n"
+    "    gui_fill_rect(win, x, y, w, h)\n"
+    "    gui_pen(win, 0x191919)\n"
+    "    gui_rect(win, x, y, w, h)\n"
+    "}\n"
+    "\n"
+    "fn main() {\n"
+    "    let win: i32 = gui_window(60, 40, 400, 310, \"ROX UI Demo\")\n"
+    "    let c: i32 = 0\n"
+    "    mut counter: i32 = 0\n"
+    "    mut checked: i32 = 0\n"
+    "    mut progress: i32 = 25\n"
+    "    mut selected: i32 = 0\n"
+    "    mut redraw: i32 = 1\n"
+    "\n"
+    "    while c != 113 {\n"
+    "        if redraw == 1 {\n"
+    "            // Clear canvas with dark background\n"
+    "            gui_fill(win, 0x2E2E2E)\n"
+    "\n"
+    "            // Title label\n"
+    "            gui_text(win, 10, 8, \"microui-style Demo (ROX)\", 0xE6E6E6)\n"
+    "\n"
+    "            // Separator line\n"
+    "            gui_pen(win, 0x191919)\n"
+    "            gui_line(win, 10, 22, 380, 22)\n"
+    "\n"
+    "            // --- Buttons panel ---\n"
+    "            draw_panel(win, 8, 30, 380, 50)\n"
+    "            gui_text(win, 14, 36, \"Buttons:\", 0xA0A0A0)\n"
+    "\n"
+    "            // Highlight the selected button\n"
+    "            if selected == 0 {\n"
+    "                draw_button(win, 80, 36, 90, 20, \"Click [1]\", 1)\n"
+    "            } else {\n"
+    "                draw_button(win, 80, 36, 90, 20, \"Click [1]\", 0)\n"
+    "            }\n"
+    "\n"
+    "            if selected == 1 {\n"
+    "                draw_button(win, 180, 36, 90, 20, \"Reset [2]\", 1)\n"
+    "            } else {\n"
+    "                draw_button(win, 180, 36, 90, 20, \"Reset [2]\", 0)\n"
+    "            }\n"
+    "\n"
+    "            // Counter display\n"
+    "            if counter == 0 { gui_text(win, 280, 42, \"Count: 0\", 0xE6E6E6) }\n"
+    "            if counter == 1 { gui_text(win, 280, 42, \"Count: 1\", 0xE6E6E6) }\n"
+    "            if counter == 2 { gui_text(win, 280, 42, \"Count: 2\", 0xE6E6E6) }\n"
+    "            if counter == 3 { gui_text(win, 280, 42, \"Count: 3\", 0xE6E6E6) }\n"
+    "            if counter == 4 { gui_text(win, 280, 42, \"Count: 4\", 0xE6E6E6) }\n"
+    "            if counter == 5 { gui_text(win, 280, 42, \"Count: 5\", 0xE6E6E6) }\n"
+    "            if counter > 5  { gui_text(win, 280, 42, \"Count: 5+\", 0xE6E6E6) }\n"
+    "\n"
+    "            // Status line at bottom of buttons panel\n"
+    "            gui_text(win, 14, 60, \"Press 1/2 to click buttons\", 0x606060)\n"
+    "\n"
+    "            // --- Checkbox panel ---\n"
+    "            draw_panel(win, 8, 86, 380, 40)\n"
+    "            draw_checkbox(win, 14, 96, \"Enable feature [space]\", checked)\n"
+    "\n"
+    "            // --- Progress panel ---\n"
+    "            draw_panel(win, 8, 132, 380, 50)\n"
+    "            gui_text(win, 14, 138, \"Progress (A/D to adjust):\", 0xA0A0A0)\n"
+    "            draw_progress(win, 14, 156, 368, 16, progress, 100)\n"
+    "\n"
+    "            // --- Info panel ---\n"
+    "            draw_panel(win, 8, 188, 380, 72)\n"
+    "            gui_text(win, 14, 194, \"Keyboard Controls:\", 0xA0A0A0)\n"
+    "            gui_text(win, 14, 210, \"1 = Click  2 = Reset  Space = Toggle\", 0x808080)\n"
+    "            gui_text(win, 14, 226, \"A/D = Progress  Q = Quit\", 0x808080)\n"
+    "            gui_text(win, 14, 242, \"Tab = Switch button focus\", 0x808080)\n"
+    "\n"
+    "            gui_flush(win)\n"
+    "            redraw = 0\n"
+    "        }\n"
+    "\n"
+    "        c = gui_wait(win)\n"
+    "\n"
+    "        // Handle key: '1' = click button\n"
+    "        if c == 49 { selected = 0    counter = counter + 1    redraw = 1 }\n"
+    "\n"
+    "        // Handle key: '2' = reset\n"
+    "        if c == 50 { selected = 1    counter = 0    progress = 25    checked = 0    redraw = 1 }\n"
+    "\n"
+    "        // Handle key: space = toggle checkbox\n"
+    "        if c == 32 {\n"
+    "            if checked == 0 { checked = 1 } else { checked = 0 }\n"
+    "            redraw = 1\n"
+    "        }\n"
+    "\n"
+    "        // Handle key: 'a' = decrease progress\n"
+    "        if c == 97 {\n"
+    "            progress = progress - 5\n"
+    "            if progress < 0 { progress = 0 }\n"
+    "            redraw = 1\n"
+    "        }\n"
+    "\n"
+    "        // Handle key: 'd' = increase progress\n"
+    "        if c == 100 {\n"
+    "            progress = progress + 5\n"
+    "            if progress > 100 { progress = 100 }\n"
+    "            redraw = 1\n"
+    "        }\n"
+    "\n"
+    "        // Handle key: tab = switch focus\n"
+    "        if c == 9 {\n"
+    "            if selected == 0 { selected = 1 } else { selected = 0 }\n"
+    "            redraw = 1\n"
+    "        }\n"
+    "    }\n"
+    "\n"
+    "    gui_close(win)\n"
+    "}\n";
+
 static const struct sample_entry sample_table[] = {
     { "hello",   "hello.ros",   sample_hello,   "Hello + variables"       },
     { "strings", "strings.ros", sample_strings, "String printing"         },
@@ -1365,6 +1542,7 @@ static const struct sample_entry sample_table[] = {
     { "loops",   "loops.ros",   sample_loops,   "While loops + if/else"   },
     { "funcs",   "funcs.ros",   sample_funcs,   "Functions + recursion"   },
     { "gui",     "gui.ros",     sample_gui,     "GUI library: import, widgets, grid/flex layout" },
+    { "mu",      "mu_demo.ros", sample_mu,      "microui-style GUI: panels, buttons, checkbox, progress bar" },
     { "test",    "test_all.ros", sample_test,   "Full language feature test (PASS/FAIL report)"  },
 };
 
@@ -1435,4 +1613,28 @@ static int cmd_sample(int argc, char **argv)
     puts(path);
     putchar('\n');
     return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * microui – launch the microui demo as a kernel process
+ * ------------------------------------------------------------------------- */
+static int cmd_microui(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+#ifdef GUI_MODE
+    process_t *p = process_create("mu_demo", mu_demo_run, 0);
+    if (!p) {
+        puts_color("microui: failed to create process\n", COLOR_LIGHT_RED);
+        return -1;
+    }
+    sched_add(p);
+    puts("microui demo launched\n");
+    int status = process_wait(p->pid);
+    process_destroy(p);
+    return status;
+#else
+    puts("microui requires GUI mode\n");
+    return -1;
+#endif
 }
