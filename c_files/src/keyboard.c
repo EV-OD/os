@@ -3,6 +3,7 @@
 #include "stdio.h"
 #include "sched.h"
 #include "process.h"
+#include "log.h"
 
 /* -------------------------------------------------------------------------
  * Scan code set 1 → ASCII tables (unshifted and shifted)

@@ -365,7 +365,7 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
                 if (owner > 0) {
                     process_t *p = process_find((unsigned int)owner);
                     if (p && p->state != PROC_DEAD) {
-                        p->killed = 1;  /* process exits cleanly via syscall loop */
+                        p->killed = 1;  /* process exits cleanly via syscall loop */  /* process exits cleanly via syscall loop */
                         sched_wake_process(p); /* unblock it if it is sleeping */
                     }
                 }
