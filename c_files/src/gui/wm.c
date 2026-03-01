@@ -95,6 +95,7 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     win->pen_color   = 0xFFFFFF;  /* default stroke = white */
     win->bg_color   = 0x001020;  /* default bg = dark navy  */
     win->owner_pid  = 0;
+    win->no_drag    = 0;  /* explicitly zero: kmalloc doesn't clear memory */
 
     /* Per-window key queue – must be zero so head==tail (empty) on first use */
     win->kq_head = 0;

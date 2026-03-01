@@ -379,8 +379,8 @@ int tbuf_saveas(int h, void *win_ptr)
             __asm__ volatile("hlt");
         }
 
-        if (c == 27) return -1;  /* Escape – cancel */
-        if (c == 13) break;      /* Enter  – confirm */
+        if (c == 27) return -1;           /* Escape – cancel */
+        if (c == 13 || c == '\n') break;  /* Enter  – confirm (keyboard maps Enter→'\n'=10) */
         if ((c == 8 || c == 127) && nlen > 0) {
             name[--nlen] = '\0';
         } else if (c >= 32 && c < 127 && nlen < 63) {

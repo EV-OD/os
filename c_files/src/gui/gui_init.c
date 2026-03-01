@@ -65,7 +65,9 @@ int gui_launch(multiboot_info_t *mb)
     int sw = (int)fb_width();
     int sh = (int)fb_height();
 
-    wm_window_t *win = wm_create(4, 4, sw - 8, sh - TASKBAR_H - 8, "Terminal");
+    /* Leave an 80-px left strip so desktop icons (x=16) are not hidden behind
+     * the initial terminal window. */
+    wm_window_t *win = wm_create(80, 4, sw - 88, sh - TASKBAR_H - 8, "Terminal");
     if (win) {
         terminal_t *t = gui_term_create(win);
         if (t) {
