@@ -8,6 +8,7 @@
 #include "gui/wm.h"
 #include "gui/canvas.h"
 #include "gui/fb.h"
+#include "shell.h"
 
 /* Virtual key codes (must match keyboard.c) */
 #define KEY_UP    200
@@ -67,13 +68,26 @@ int tbuf_open(const char *path)
 
     textbuf_t *b = &bufs[h];
     memset(b, 0, sizeof(*b));
-    /* Normalise to absolute path: "foo.txt" → "/foo.txt" */
-    if (path && path[0] != '/') {
-        b->filename[0] = '/';
-        strncpy(b->filename + 1, path, 254);
+    /* Normalise to absolute path. Relative paths are resolved against the
+     * shell's current working directory so that "hello.txt" in /home opens
+     * /home/hello.txt, not /hello.txt. */
+    if (path && path[0] == '/') {
+        /* Already absolute */
+        strncpy(b->filename, path, 255);
         b->filename[255] = '\0';
+    } else if (path && path[0]) {
+        /* Relative – prepend shell cwd */
+        const char *cwd = shell_get_cwd();
+        unsigned int clen = strlen(cwd);
+        strncpy(b->filename, cwd, 255);
+        b->filename[255] = '\0';
+        if (clen > 0 && b->filename[clen - 1] != '/' && clen < 254) {
+            b->filename[clen++] = '/';
+            b->filename[clen]   = '\0';
+        }
+        strncat(b->filename, path, 255 - strlen(b->filename));
     } else {
-        strncpy(b->filename, (path && path[0]) ? path : "/untitled", 255);
+        strncpy(b->filename, "/untitled", 255);
         b->filename[255] = '\0';
     }
     b->in_use     = 1;

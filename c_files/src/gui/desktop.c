@@ -353,6 +353,33 @@ void desktop_add_icon_path(const char *label, const char *path)
 }
 
 /* -------------------------------------------------------------------------
+ * desktop_remove_icon
+ * ------------------------------------------------------------------------- */
+
+int desktop_remove_icon(const char *label)
+{
+    int i, j;
+    for (i = 0; i < s_icon_count; i++) {
+        icon_slot_t *ic = &s_icons[i];
+        if (!ic->used) continue;
+        if (ic->path[0] == '\0') continue; /* never remove built-ins */
+        /* Compare label */
+        int k;
+        for (k = 0; ic->label_buf[k] && label[k]; k++)
+            if (ic->label_buf[k] != label[k]) break;
+        if (ic->label_buf[k] != '\0' || label[k] != '\0') continue;
+        /* Found – shift remaining slots down */
+        for (j = i; j < s_icon_count - 1; j++)
+            s_icons[j] = s_icons[j + 1];
+        s_icon_count--;
+        s_icons_dirty = 1;
+        desktop_save_config();
+        return 0;
+    }
+    return -1;
+}
+
+/* -------------------------------------------------------------------------
  * desktop_save_config / desktop_load_config  –  /etc/desktop.con
  *
  * Format (one line per icon):  icon <label> <path>

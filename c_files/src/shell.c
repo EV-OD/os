@@ -117,6 +117,8 @@ static const builtin_cmd_t builtins[] = {
  * path.  If the path starts with '/', use it as-is.  Otherwise, join
  * cwd + "/" + path.  Result written into out (must be >= 256 bytes).
  */
+const char *shell_get_cwd(void) { return cwd; }
+
 static void resolve_path(const char *input, char *out, unsigned int out_size)
 {
     if (input[0] == '/') {
@@ -2042,11 +2044,29 @@ static int cmd_setup(int argc, char **argv)
 /* --- desktop ----------------------------------------------------------- */
 static int cmd_desktop(int argc, char **argv)
 {
-    if (argc < 3 || strcmp(argv[1], "add") != 0) {
-        puts("Usage: desktop add <name|path.rox>\n"
-             "  name      looks for /bin/<name>.rox\n"
-             "  path.rox  uses the exact path\n");
+    if (argc < 3 || (strcmp(argv[1], "add") != 0 &&
+                      strcmp(argv[1], "delete") != 0 &&
+                      strcmp(argv[1], "del") != 0)) {
+        puts("Usage:\n"
+             "  desktop add <name|path.rox>  add icon (name → /bin/<name>.rox)\n"
+             "  desktop delete <label>       remove icon by label\n");
         return -1;
+    }
+
+    /* --- delete subcommand --- */
+    if (strcmp(argv[1], "delete") == 0 || strcmp(argv[1], "del") == 0) {
+        const char *label = argv[2];
+        int ret = desktop_remove_icon(label);
+        if (ret == 0) {
+            puts_color("[desktop] icon '", COLOR_LIGHT_CYAN);
+            puts_color(label, COLOR_WHITE);
+            puts_color("' removed.\n", COLOR_LIGHT_CYAN);
+        } else {
+            puts_color("[desktop] icon not found: ", COLOR_LIGHT_RED);
+            puts((char *)label);
+            putchar('\n');
+        }
+        return ret;
     }
 
     const char *arg = argv[2];

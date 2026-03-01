@@ -107,4 +107,12 @@ void desktop_save_config(void);
  */
 void desktop_load_config(void);
 
+/**
+ * Remove a path-based desktop icon by its label (case-sensitive).
+ * Also persists the updated list to /etc/desktop.con.
+ * Built-in icons (no path) are never removed.
+ * @return 0 if found and removed, -1 if not found.
+ */
+int desktop_remove_icon(const char *label);
+
 #endif /* GUI_DESKTOP_H */
