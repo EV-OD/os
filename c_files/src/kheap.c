@@ -113,6 +113,9 @@ void kheap_init(void)
              hstart, KHEAP_VEND,
              KHEAP_INITIAL_SIZE / 1024u,
              (KHEAP_VEND - hstart) / 1024u);
+    log_info("[kheap] phys pool: [0x%x, 0x%x) reserved from PFA",
+             hstart - 0xC0000000u,
+             hstart - 0xC0000000u + KHEAP_INITIAL_SIZE);
 }
 
 /* =========================================================================

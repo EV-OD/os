@@ -415,6 +415,9 @@ process_t *process_create_user(const char *name,
     log_info("[process] created user '%s' pid=%d nice=%d entry=0x%x pd=0x%x",
              name, (int)proc->pid, nice,
              USER_CODE_VADDR + entry_off, (unsigned int)pd);
+    log_debug("[process] iret frame: saved_esp=0x%x user_esp=0x%x eip=0x%x cs=0x%x",
+              proc->saved_esp, (unsigned int)sp[-1],
+              (unsigned int)sp[-4], (unsigned int)sp[-3]);
 
     return proc;
 }

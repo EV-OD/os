@@ -68,9 +68,16 @@ void kernel_init(unsigned int mb_magic, multiboot_info_t *mb)
      * boundaries so it can mark those frames as reserved.
      */
     if (mb_magic == MULTIBOOT_BOOTLOADER_MAGIC) {
+        /*
+         * Reserve [phys_kernel_start, phys_kernel_end + KHEAP_INITIAL_SIZE)
+         * so the PFA never hands out physical frames that the kernel heap
+         * already uses.  kheap_init() maps its initial pool directly onto
+         * the PSE-backed virtual range starting at PHYS_TO_VIRT(kernel_end);
+         * without this reservation those frames would alias kheap memory.
+         */
         pfa_init(mb,
                  (unsigned int)&kernel_physical_start,
-                 (unsigned int)&kernel_physical_end);
+                 (unsigned int)&kernel_physical_end + KHEAP_INITIAL_SIZE);
 
         /*
          * Extend kernel page-directory mapping so PHYS_TO_VIRT() works for

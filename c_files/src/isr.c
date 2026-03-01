@@ -38,7 +38,6 @@ static void timer_stub(struct cpu_state *cpu, struct stack_state *stack, unsigne
 static void page_fault_handler(struct cpu_state *cpu, struct stack_state *stack,
                                unsigned int interrupt)
 {
-    (void)cpu;
     (void)interrupt;
 
     unsigned int cr2;
@@ -56,6 +55,16 @@ static void page_fault_handler(struct cpu_state *cpu, struct stack_state *stack,
             (err & 1) ? "protection" : "not-present",
             (err & 2) ? "write"      : "read",
             (err & 4) ? "user"       : "kernel");
+    serial_write(buf);
+    serial_write("\r\n");
+
+    /* Dump registers for easier diagnosis */
+    sprintf(buf, "[#PF] EAX=0x%x EBX=0x%x ECX=0x%x EDX=0x%x",
+            cpu->eax, cpu->ebx, cpu->ecx, cpu->edx);
+    serial_write(buf);
+    serial_write("\r\n");
+    sprintf(buf, "[#PF] ESI=0x%x EDI=0x%x EBP=0x%x uESP=0x%x",
+            cpu->esi, cpu->edi, cpu->ebp, stack->user_esp);
     serial_write(buf);
     serial_write("\r\n");
 

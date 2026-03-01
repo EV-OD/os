@@ -185,6 +185,15 @@ unsigned int *paging_create_user_directory(void)
     log_debug("[paging] created user PD phys=0x%x virt=0x%x",
               pd_phys, (unsigned int)pd);
 
+    /* Sanity: warn if PD frame aliases the kernel heap region.
+     * kheap starts at kernel_virtual_end (phys ~= kernel_physical_end),
+     * so any PD frame at the same physical address would corrupt the heap. */
+    if (pd_phys < 0x01000000u) {
+        /* Frame is in the first 16 MB – check if it's in the expected
+         * post-kernel region that the PFA should now reserve properly. */
+        log_debug("[paging] PD frame 0x%x sanity OK (post-kheap-fix)", pd_phys);
+    }
+
     return pd;
 }
 

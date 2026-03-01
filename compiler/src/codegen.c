@@ -218,16 +218,28 @@ static void emit_expr(Codegen *cg, AstNode *n) {
         }
         case AST_GUI_CALL: {
             /* GUI system calls */
-            /* push args right to left because syscall expects EBX, ECX, EDX, ESI, EDI from stack */
+            /* push args right to left, then pop into syscall regs.
+             * Syscall convention: EAX=op, EBX=arg0, ECX=arg1, EDX=arg2,
+             *                     ESI=arg3, EDI=arg4.
+             * If more than 5 args are passed we push extra slots onto the
+             * stack but only consume the first 5; clean the rest up with
+             * ADD ESP afterwards so ESP stays balanced. */
+            int pushed = n->arg_count;
             for (int i = n->arg_count - 1; i >= 0; i--) {
                 emit_expr(cg, n->args[i]);
                 emit_push_eax(cg);
             }
-            if (n->arg_count >= 1) emit_pop_ebx(cg);
-            if (n->arg_count >= 2) emit_pop_ecx(cg);
-            if (n->arg_count >= 3) emit_pop_edx(cg);
-            if (n->arg_count >= 4) emit_pop_esi(cg);
-            if (n->arg_count >= 5) emit_pop_edi(cg);
+            int popped = 0;
+            if (n->arg_count >= 1) { emit_pop_ebx(cg); popped++; }
+            if (n->arg_count >= 2) { emit_pop_ecx(cg); popped++; }
+            if (n->arg_count >= 3) { emit_pop_edx(cg); popped++; }
+            if (n->arg_count >= 4) { emit_pop_esi(cg); popped++; }
+            if (n->arg_count >= 5) { emit_pop_edi(cg); popped++; }
+            /* Discard any remaining args beyond 5 */
+            if (pushed > popped) {
+                int extra = (pushed - popped) * 4;
+                emit8(cg, 0x83); emit8(cg, 0xC4); emit8(cg, (u8)extra); /* add esp, extra */
+            }
             emit_mov_eax_imm(cg, n->gui_op);
             emit_int80(cg);
             break;

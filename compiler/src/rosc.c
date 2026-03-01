@@ -382,8 +382,16 @@ int rosc_compile(const char *src_path, const char *out_path, int force)
         puts_color(buf, COLOR_LIGHT_GREEN);
     }
 
-    /* dump code / stats if requested */
-    // codegen_dump_code(&g_codegen);
+    /* Dump entry bytes for diagnosis */
+    {
+        char dbuf[128];
+        unsigned int eo = g_codegen.entry_offset;
+        unsigned char *b = (unsigned char *)g_codegen.binary;
+        sprintf(dbuf, "[rosc] entry[+0..+11]: %x %x %x %x %x %x %x %x %x %x %x %x",
+                b[eo], b[eo+1], b[eo+2], b[eo+3], b[eo+4], b[eo+5],
+                b[eo+6], b[eo+7], b[eo+8], b[eo+9], b[eo+10], b[eo+11]);
+        log_info("%s", dbuf);
+    }
 
     log_info("[rosc] wrote %s (%d + %d bytes)",
              output_path, (int)sizeof(hdr), g_codegen.binary_len);
