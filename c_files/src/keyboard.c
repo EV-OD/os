@@ -79,10 +79,13 @@ static int e0_pending   = 0;   /* non-zero: last byte was E0 prefix       */
 static unsigned char keyboard_read_scancode(void);
 static char keyboard_scancode_to_ascii(unsigned char scancode, int shifted);
 
-/* Simple ring buffer – unsigned so arrow-key codes 200-205 survive intact. */
-static unsigned char char_buffer[128];
-static unsigned int head = 0;
-static unsigned int tail = 0;
+/* Simple ring buffer – unsigned so arrow-key codes 200-205 survive intact.
+ * head/tail/char_buffer MUST be volatile: the ISR modifies them
+ * asynchronously and the main-loop code must re-read from memory every
+ * time (no cached-register optimisation). */
+static volatile unsigned char char_buffer[128];
+static volatile unsigned int head = 0;
+static volatile unsigned int tail = 0;
 
 static int buffer_is_full(void)
 {

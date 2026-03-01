@@ -112,6 +112,13 @@ void syscall_dispatch(struct cpu_state *cpu, struct stack_state *stack)
         return;
     }
 
+    /* Re-enable hardware interrupts so keyboard/timer IRQs are not masked
+     * during long-running syscall handlers (e.g. gui_fill clearing 254 KB
+     * of canvas pixels).  The int 0x80 interrupt gate cleared IF on entry;
+     * iret at the end of common_isr_stub restores it from the saved user
+     * EFLAGS, so we do not need an explicit CLI here before returning. */
+    __asm__ volatile("sti");
+
     ret = syscall_table[num](cpu, stack);
     cpu->eax = (unsigned int)ret;
 }
