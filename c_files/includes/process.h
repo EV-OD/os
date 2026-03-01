@@ -101,6 +101,10 @@ typedef struct process {
     /* --- Signal flags ---------------------------------------------------- */
     volatile int    killed;       /**< Non-zero: process should terminate ASAP */
 
+    /* --- Command-line arguments (user processes) ------------------------ */
+    int             argc;         /**< Number of args (0 if unused)           */
+    const char     *args[8];      /**< Argument strings (kernel-owned copies) */
+
     /* --- Linked list for run queue --------------------------------------- */
     struct process *next;         /**< Next process in the run queue (or NULL)*/
 } process_t;

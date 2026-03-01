@@ -50,6 +50,23 @@ static const char scancode_ascii_shift[] = {
 #define SC_LCTRL_PRESS    0x1D  /* Left Ctrl pressed  */
 #define SC_LCTRL_RELEASE  0x9D  /* Left Ctrl released */
 #define SC_C_KEY          0x2E  /* 'c' key scancode   */
+#define SC_S_KEY          0x1F  /* 's' key scancode   */
+#define SC_Q_KEY          0x10  /* 'q' key scancode   */
+#define SC_E0_PREFIX      0xE0  /* extended scancode prefix  */
+#define SC_UP_KEY         0x48  /* arrow up (after E0)       */
+#define SC_DOWN_KEY       0x50  /* arrow down (after E0)     */
+#define SC_LEFT_KEY       0x4B  /* arrow left (after E0)     */
+#define SC_RIGHT_KEY      0x4D  /* arrow right (after E0)    */
+#define SC_HOME_KEY       0x47  /* Home (after E0)           */
+#define SC_END_KEY        0x4F  /* End (after E0)            */
+
+/* Virtual key codes pushed to the buffer for special keys */
+#define KEY_UP    200u
+#define KEY_DOWN  201u
+#define KEY_LEFT  202u
+#define KEY_RIGHT 203u
+#define KEY_HOME  204u
+#define KEY_END   205u
 
 /* -------------------------------------------------------------------------
  * Modifier state
@@ -57,12 +74,13 @@ static const char scancode_ascii_shift[] = {
 static int shift_held   = 0;   /* non-zero while either Shift is pressed */
 static int caps_enabled = 0;   /* toggled by Caps Lock                   */
 static int ctrl_held    = 0;   /* non-zero while Ctrl is pressed          */
+static int e0_pending   = 0;   /* non-zero: last byte was E0 prefix       */
 
 static unsigned char keyboard_read_scancode(void);
 static char keyboard_scancode_to_ascii(unsigned char scancode, int shifted);
 
-/* Simple ring buffer for ASCII keypresses. */
-static char char_buffer[128];
+/* Simple ring buffer – unsigned so arrow-key codes 200-205 survive intact. */
+static unsigned char char_buffer[128];
 static unsigned int head = 0;
 static unsigned int tail = 0;
 
@@ -76,7 +94,7 @@ static int buffer_is_empty(void)
     return head == tail;
 }
 
-static void buffer_push(char c)
+static void buffer_push(unsigned char c)
 {
     if (buffer_is_full()) {
         return; /* drop if full */
@@ -102,6 +120,26 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
     (void)interrupt;
 
     unsigned char scancode = keyboard_read_scancode();
+
+    /* ---- Extended (E0-prefix) scancode handling ---- */
+    if (scancode == SC_E0_PREFIX) {
+        e0_pending = 1;
+        return;
+    }
+    if (e0_pending) {
+        e0_pending = 0;
+        switch (scancode) {
+            case SC_UP_KEY:    buffer_push(KEY_UP);    break;
+            case SC_DOWN_KEY:  buffer_push(KEY_DOWN);  break;
+            case SC_LEFT_KEY:  buffer_push(KEY_LEFT);  break;
+            case SC_RIGHT_KEY: buffer_push(KEY_RIGHT); break;
+            case SC_HOME_KEY:  buffer_push(KEY_HOME);  break;
+            case SC_END_KEY:   buffer_push(KEY_END);   break;
+            default: break;
+        }
+        sched_wake_waiters(WAIT_KEY);
+        return;
+    }
 
     /* ---- Track modifier key press / release ---- */
     if (scancode == SC_LSHIFT_PRESS || scancode == SC_RSHIFT_PRESS) {
@@ -135,11 +173,13 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         process_t *cur = sched_current();
         if (cur && cur->state != PROC_DEAD) {
             cur->killed = 1;
-            /* Wake it if it is sleeping so it can see the flag. */
             sched_wake_process(cur);
         }
-        return;  /* do not push to the char buffer */
+        return;
     }
+    /* Ctrl+S → 19 (DC3), Ctrl+Q → 17 (DC1): pass to app for editor shortcuts */
+    if (ctrl_held && scancode == SC_S_KEY) { buffer_push(19); sched_wake_waiters(WAIT_KEY); return; }
+    if (ctrl_held && scancode == SC_Q_KEY) { buffer_push(17); sched_wake_waiters(WAIT_KEY); return; }
 
     /*
      * Determine the effective shift state for this key:

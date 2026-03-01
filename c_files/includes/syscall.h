@@ -45,8 +45,19 @@
 #define SYS_GUI_FILL_ROUND  19  /* filled rounded rectangle     */
 #define SYS_GUI_MOUSE       20  /* packed mouse state (x|y<<12|btn<<24) for window */
 
+/* Text buffer syscalls (for rxt editor) */
+#define SYS_TBUF_OPEN      21  /* int  tbuf_open(const char *path)               */
+#define SYS_TBUF_CLOSE     22  /* int  tbuf_close(int h)                         */
+#define SYS_TBUF_SAVE      23  /* int  tbuf_save(int h)                          */
+#define SYS_TBUF_GETLINE   24  /* const char *tbuf_getline(int h, int n)         */
+#define SYS_TBUF_INPUT     25  /* int  tbuf_input(int h, int key)                */
+#define SYS_TBUF_LINECOUNT 26  /* int  tbuf_linecount(int h)                     */
+#define SYS_TBUF_CURSOR    27  /* int  tbuf_cursor(int h)  (line | col<<16)      */
+#define SYS_TBUF_NUMSTR    28  /* const char *tbuf_numstr(int h, int n)          */
+#define SYS_GETARG         29  /* const char *getarg(int idx)                    */
+
 #undef SYSCALL_MAX
-#define SYSCALL_MAX  20
+#define SYSCALL_MAX  29
 
 
 /* -------------------------------------------------------------------------

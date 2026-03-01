@@ -23,6 +23,8 @@ int strncmp(const char *str1, const char *str2, unsigned int n);
 void *memset(void *dest, int val, unsigned int n);
 // copy n bytes from src to dest
 void *memcpy(void *dest, const void *src, unsigned int n);
+// copy n bytes from src to dest, correctly handles overlapping regions
+void *memmove(void *dest, const void *src, unsigned int n);
 // compare n bytes of two memory areas
 int memcmp(const void *ptr1, const void *ptr2, unsigned int n);
 

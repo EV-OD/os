@@ -37,8 +37,7 @@ int rox_validate_header(const rox_header_t *hdr)
  * ------------------------------------------------------------------------- */
 int rox_load_and_run(const char *path, int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    /* argc/argv stored below after proc is created */
 
     log_info("[rox] loading %s", path);
 
@@ -118,6 +117,17 @@ int rox_load_and_run(const char *path, int argc, char **argv)
         log_error("[rox] failed to create user process for %s", path);
         if (proc_name) kfree(proc_name);
         return -4;
+    }
+
+    /* Store argv strings in process so SYS_GETARG can read them */
+    {
+        int i;
+        proc->argc = (argc > 8) ? 8 : argc;
+        for (i = 0; i < proc->argc; i++) {
+            char *copy = (char *)kmalloc(strlen(argv[i]) + 1);
+            if (copy) { memcpy(copy, argv[i], strlen(argv[i]) + 1); }
+            proc->args[i] = copy ? copy : "";
+        }
     }
 
     /* Add to scheduler and wait for completion */

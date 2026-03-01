@@ -45,6 +45,17 @@ static int sys_gui_fill_circle(struct cpu_state *cpu, struct stack_state *stack)
 static int sys_gui_fill_round(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_mouse(struct cpu_state *cpu, struct stack_state *stack);
 
+/* textbuf / argv */
+static int sys_tbuf_open(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_close(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_save(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_getline(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_input(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_linecount(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_cursor(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_numstr(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_getarg(struct cpu_state *cpu, struct stack_state *stack);
+
 /* -------------------------------------------------------------------------
  * Syscall table
  * ------------------------------------------------------------------------- */
@@ -72,6 +83,16 @@ static syscall_fn_t syscall_table[] = {
     [SYS_GUI_FILL_CIRCLE] = sys_gui_fill_circle,
     [SYS_GUI_FILL_ROUND]  = sys_gui_fill_round,
     [SYS_GUI_MOUSE]       = sys_gui_mouse,
+
+    [SYS_TBUF_OPEN]        = sys_tbuf_open,
+    [SYS_TBUF_CLOSE]       = sys_tbuf_close,
+    [SYS_TBUF_SAVE]        = sys_tbuf_save,
+    [SYS_TBUF_GETLINE]     = sys_tbuf_getline,
+    [SYS_TBUF_INPUT]       = sys_tbuf_input,
+    [SYS_TBUF_LINECOUNT]   = sys_tbuf_linecount,
+    [SYS_TBUF_CURSOR]      = sys_tbuf_cursor,
+    [SYS_TBUF_NUMSTR]      = sys_tbuf_numstr,
+    [SYS_GETARG]           = sys_getarg,
 };
 
 /* -------------------------------------------------------------------------
@@ -555,4 +576,79 @@ static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
         wcur->wait_reason = WAIT_NONE;
     }
     return c;
+}
+
+/* =========================================================================
+ * Text Buffer Syscalls  (SYS_TBUF_OPEN … SYS_GETARG)
+ * ========================================================================= */
+#include "textbuf.h"
+
+/* SYS_TBUF_OPEN (21) – EBX = path ptr.  Returns handle (0-3) or -1. */
+static int sys_tbuf_open(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return tbuf_open((const char *)cpu->ebx);
+}
+
+/* SYS_TBUF_CLOSE (22) – EBX = handle. */
+static int sys_tbuf_close(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return tbuf_close((int)cpu->ebx);
+}
+
+/* SYS_TBUF_SAVE (23) – EBX = handle. */
+static int sys_tbuf_save(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return tbuf_save((int)cpu->ebx);
+}
+
+/* SYS_TBUF_GETLINE (24) – EBX=handle, ECX=line index.
+ * Returns pointer to the NUL-terminated line string. */
+static int sys_tbuf_getline(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return (int)tbuf_getline((int)cpu->ebx, (int)cpu->ecx);
+}
+
+/* SYS_TBUF_INPUT (25) – EBX=handle, ECX=key code. */
+static int sys_tbuf_input(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return tbuf_input((int)cpu->ebx, (int)cpu->ecx);
+}
+
+/* SYS_TBUF_LINECOUNT (26) – EBX=handle. */
+static int sys_tbuf_linecount(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return tbuf_linecount((int)cpu->ebx);
+}
+
+/* SYS_TBUF_CURSOR (27) – EBX=handle.
+ * Returns: (cur_line & 0xFFFF) | (cur_col << 16). */
+static int sys_tbuf_cursor(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return tbuf_cursor((int)cpu->ebx);
+}
+
+/* SYS_TBUF_NUMSTR (28) – EBX=handle, ECX=integer.
+ * Returns pointer to a static decimal string. */
+static int sys_tbuf_numstr(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    return (int)tbuf_numstr((int)cpu->ebx, (int)cpu->ecx);
+}
+
+/* SYS_GETARG (29) – EBX=index.  Returns pointer to argv[index] string
+ * (kernel-owned) or 0 if out of range. */
+static int sys_getarg(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    int idx = (int)cpu->ebx;
+    process_t *cur = sched_current();
+    if (!cur || idx < 0 || idx >= cur->argc) return 0;
+    return (int)cur->args[idx];
 }

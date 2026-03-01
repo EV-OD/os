@@ -108,6 +108,16 @@ static const KwEntry KEYWORDS[] = {
     { "gui_fill_circle", TOK_GUI_FILL_CIRCLE},
     { "gui_fill_round",  TOK_GUI_FILL_ROUND },
     { "gui_mouse",        TOK_GUI_MOUSE      },
+    /* text buffer builtins */
+    { "tbuf_open",      TOK_TBUF_OPEN      },
+    { "tbuf_close",     TOK_TBUF_CLOSE     },
+    { "tbuf_save",      TOK_TBUF_SAVE      },
+    { "tbuf_getline",   TOK_TBUF_GETLINE   },
+    { "tbuf_input",     TOK_TBUF_INPUT     },
+    { "tbuf_linecount", TOK_TBUF_LINECOUNT },
+    { "tbuf_cursor",    TOK_TBUF_CURSOR    },
+    { "tbuf_numstr",    TOK_TBUF_NUMSTR    },
+    { "getarg",         TOK_GETARG         },
     /* primitive types */
     { "i8",         TOK_TYPE_I8   },
     { "i16",        TOK_TYPE_I16  },
@@ -411,6 +421,15 @@ const char *token_type_name(TokenType t)
         case TOK_GUI_FILL_CIRCLE:  return "gui_fill_circle";
         case TOK_GUI_FILL_ROUND:   return "gui_fill_round";
         case TOK_GUI_MOUSE:        return "gui_mouse";
+        case TOK_TBUF_OPEN:       return "tbuf_open";
+        case TOK_TBUF_CLOSE:      return "tbuf_close";
+        case TOK_TBUF_SAVE:       return "tbuf_save";
+        case TOK_TBUF_GETLINE:    return "tbuf_getline";
+        case TOK_TBUF_INPUT:      return "tbuf_input";
+        case TOK_TBUF_LINECOUNT:  return "tbuf_linecount";
+        case TOK_TBUF_CURSOR:     return "tbuf_cursor";
+        case TOK_TBUF_NUMSTR:     return "tbuf_numstr";
+        case TOK_GETARG:          return "getarg";
         case TOK_TYPE_I8:     return "i8";
         case TOK_TYPE_I16:    return "i16";
         case TOK_TYPE_I32:    return "i32";

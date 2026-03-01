@@ -92,7 +92,12 @@ static int tok_is_gui(Parser *p)
             t == TOK_GUI_WAIT         || t == TOK_GUI_POLL         ||
             t == TOK_GUI_PEN          || t == TOK_GUI_FILL_RECT    ||
             t == TOK_GUI_FILL_CIRCLE  || t == TOK_GUI_FILL_ROUND ||
-            t == TOK_GUI_MOUSE);
+            t == TOK_GUI_MOUSE        ||
+            t == TOK_TBUF_OPEN        || t == TOK_TBUF_CLOSE       ||
+            t == TOK_TBUF_SAVE        || t == TOK_TBUF_GETLINE     ||
+            t == TOK_TBUF_INPUT       || t == TOK_TBUF_LINECOUNT   ||
+            t == TOK_TBUF_CURSOR      || t == TOK_TBUF_NUMSTR      ||
+            t == TOK_GETARG);
 }
 
 /* Parse and return a type name string into buf (MAX_IDENT_LEN). */
@@ -217,6 +222,15 @@ static AstNode *parse_primary(Parser *p)
             case TOK_GUI_FILL_CIRCLE:  n->gui_op = 18; break;
             case TOK_GUI_FILL_ROUND:   n->gui_op = 19; break;
             case TOK_GUI_MOUSE:         n->gui_op = 20; break;
+            case TOK_TBUF_OPEN:         n->gui_op = 21; break;
+            case TOK_TBUF_CLOSE:        n->gui_op = 22; break;
+            case TOK_TBUF_SAVE:         n->gui_op = 23; break;
+            case TOK_TBUF_GETLINE:      n->gui_op = 24; break;
+            case TOK_TBUF_INPUT:        n->gui_op = 25; break;
+            case TOK_TBUF_LINECOUNT:    n->gui_op = 26; break;
+            case TOK_TBUF_CURSOR:       n->gui_op = 27; break;
+            case TOK_TBUF_NUMSTR:       n->gui_op = 28; break;
+            case TOK_GETARG:            n->gui_op = 29; break;
             default:                   n->gui_op = 0;  break;
         }
 

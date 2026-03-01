@@ -96,6 +96,19 @@ void *memcpy(void *dest, const void *src, unsigned int n)
     return dest;
 }
 
+void *memmove(void *dest, const void *src, unsigned int n)
+{
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
+    if (d < s) {
+        while (n-- > 0) *d++ = *s++;
+    } else if (d > s) {
+        d += n; s += n;
+        while (n-- > 0) *--d = *--s;
+    }
+    return dest;
+}
+
 int memcmp(const void *ptr1, const void *ptr2, unsigned int n)
 {
     const unsigned char *p1 = (const unsigned char *)ptr1;

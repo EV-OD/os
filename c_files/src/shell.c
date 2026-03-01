@@ -79,6 +79,7 @@ static int cmd_whoami(int argc, char **argv);
 static int cmd_rosc(int argc, char **argv);
 static int cmd_sample(int argc, char **argv);
 static int cmd_microui(int argc, char **argv);
+static int cmd_setup(int argc, char **argv);
 
 static const builtin_cmd_t builtins[] = {
     { "help",   "Show available commands",          cmd_help   },
@@ -99,6 +100,7 @@ static const builtin_cmd_t builtins[] = {
     { "rosc",   "Compile .ros source to .rox",      cmd_rosc   },
     { "sample", "Create sample .ros program (try: sample list)", cmd_sample },
     { "microui","Launch microui demo window",        cmd_microui},
+    { "setup",  "Install rxt editor to /bin",       cmd_setup  },
     { (void *)0, (void *)0, (void *)0 } /* sentinel */
 };
 
@@ -628,8 +630,39 @@ static const char LIB_MATH_ROS[] =
     "}\n";
 
 static const char LIB_IO_ROS[] =
-    "// /lib/ros/io.ros  --  RandomOS Standard I/O Library\n"
+    "// /lib/ros/io.ros  --  RandomOS I/O Library\n"
+    "// Wrappers around tbuf_* text-buffer kernel builtins.\n"
     "// Usage:  import io\n"
+    "fn io_open(path: str) -> i32 {\n"
+    "    return tbuf_open(path)\n"
+    "}\n"
+    "fn io_close(h: i32) {\n"
+    "    tbuf_close(h)\n"
+    "}\n"
+    "fn io_save(h: i32) {\n"
+    "    tbuf_save(h)\n"
+    "}\n"
+    "fn io_getline(h: i32, n: i32) -> i32 {\n"
+    "    return tbuf_getline(h, n)\n"
+    "}\n"
+    "fn io_key(h: i32, k: i32) {\n"
+    "    tbuf_input(h, k)\n"
+    "}\n"
+    "fn io_lines(h: i32) -> i32 {\n"
+    "    return tbuf_linecount(h)\n"
+    "}\n"
+    "fn io_cursor(h: i32) -> i32 {\n"
+    "    return tbuf_cursor(h)\n"
+    "}\n"
+    "fn io_cline(h: i32) -> i32 {\n"
+    "    return tbuf_cursor(h) & 0xFFFF\n"
+    "}\n"
+    "fn io_ccol(h: i32) -> i32 {\n"
+    "    return (tbuf_cursor(h) >> 16) & 0xFFFF\n"
+    "}\n"
+    "fn io_itoa(h: i32, n: i32) -> i32 {\n"
+    "    return tbuf_numstr(h, n)\n"
+    "}\n"
     "fn print_sep() {\n"
     "    println(\"----------------------------------------\")\n"
     "}\n"
@@ -656,6 +689,79 @@ static void shell_init_stdlib(void)
 
     log_info("[shell] stdlib written to /lib/ros/");
 }
+
+/* =========================================================================
+ * rxt editor source (embedded, installed by 'setup' command)
+ * ========================================================================= */
+static const char RXT_ROS[] =
+    "// rxt -- RandomOS Text Editor\n"
+    "// Usage:  rxt <filename>\n"
+    "//  Ctrl+S = Save    Ctrl+Q = Quit\n"
+    "//\n"
+    "// Install with:  setup\n"
+    "// Then run:      rxt myfile.txt\n"
+    "\n"
+    "import gui\n"
+    "import io\n"
+    "\n"
+    "fn main() {\n"
+    "    let fname: i32 = getarg(1)\n"
+    "    let tb: i32 = io_open(fname)\n"
+    "    let win: i32 = gui_window(50, 30, 640, 420, \"rxt editor\")\n"
+    "    let C_BG: i32 = 0x1E1E1E\n"
+    "    let C_FG: i32 = 0xD4D4D4\n"
+    "    let C_GUT: i32 = 0x252526\n"
+    "    let C_HL: i32 = 0x2A4555\n"
+    "    let C_NUM: i32 = 0x666666\n"
+    "    let C_STATBG: i32 = 0x007ACC\n"
+    "    let C_WHITE: i32 = 0xFFFFFF\n"
+    "    let VISIBLE: i32 = 38\n"
+    "    let mut scroll: i32 = 0\n"
+    "    let mut running: i32 = 1\n"
+    "    while running == 1 {\n"
+    "        gui_fill(win, C_BG)\n"
+    "        gui_pen(win, C_GUT)\n"
+    "        gui_fill_rect(win, 0, 0, 40, 380)\n"
+    "        let cpos: i32 = io_cursor(tb)\n"
+    "        let cline: i32 = cpos & 0xFFFF\n"
+    "        let mut i: i32 = 0\n"
+    "        while i < VISIBLE {\n"
+    "            let ln: i32 = scroll + i\n"
+    "            let y: i32 = i * 10\n"
+    "            if ln == cline {\n"
+    "                gui_pen(win, C_HL)\n"
+    "                gui_fill_rect(win, 0, y, 640, 10)\n"
+    "            }\n"
+    "            gui_text(win, 2, y, io_itoa(tb, ln + 1), C_NUM)\n"
+    "            gui_text(win, 42, y, io_getline(tb, ln), C_FG)\n"
+    "            i = i + 1\n"
+    "        }\n"
+    "        gui_pen(win, C_STATBG)\n"
+    "        gui_fill_rect(win, 0, 380, 640, 20)\n"
+    "        gui_text(win, 4, 383, \"Ctrl+S:Save  Ctrl+Q:Quit  Ln:\", C_WHITE)\n"
+    "        gui_text(win, 236, 383, io_itoa(tb, cline + 1), C_WHITE)\n"
+    "        gui_flush(win)\n"
+    "        let k: i32 = gui_wait(win)\n"
+    "        if k == -1 {\n"
+    "            running = 0\n"
+    "        } else if k == 17 {\n"
+    "            running = 0\n"
+    "        } else if k == 19 {\n"
+    "            io_save(tb)\n"
+    "        } else {\n"
+    "            io_key(tb, k)\n"
+    "            let nc: i32 = io_cursor(tb) & 0xFFFF\n"
+    "            if nc < scroll {\n"
+    "                scroll = nc\n"
+    "            }\n"
+    "            if nc >= scroll + VISIBLE {\n"
+    "                scroll = nc - VISIBLE + 1\n"
+    "            }\n"
+    "        }\n"
+    "    }\n"
+    "    io_close(tb)\n"
+    "    gui_close(win)\n"
+    "}\n";
 
 /* =========================================================================
  * OS directory structure creation
@@ -1829,4 +1935,34 @@ static int cmd_microui(int argc, char **argv)
     puts("microui requires GUI mode\n");
     return -1;
 #endif
+}
+/* -------------------------------------------------------------------------
+ * setup – write rxt.ros to /tmp, compile it, install to /bin/rxt.rox
+ * ------------------------------------------------------------------------- */
+static int cmd_setup(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    int fd, ret;
+
+    puts_color("[setup] Writing rxt source...\n", COLOR_LIGHT_CYAN);
+
+    fd = vfs_open("/tmp/rxt.ros", VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd < 0) {
+        puts_color("[setup] error: cannot write /tmp/rxt.ros\n", COLOR_LIGHT_RED);
+        return -1;
+    }
+    vfs_write(fd, RXT_ROS, strlen(RXT_ROS));
+    vfs_close(fd);
+
+    puts_color("[setup] Compiling rxt.ros -> /bin/rxt.rox ...\n", COLOR_LIGHT_CYAN);
+    ret = rosc_compile("/tmp/rxt.ros", "/bin/rxt.rox", 1);
+    if (ret < 0) {
+        puts_color("[setup] error: compilation failed\n", COLOR_LIGHT_RED);
+        return -1;
+    }
+
+    vfs_unlink("/tmp/rxt.ros");
+    puts_color("[setup] rxt installed at /bin/rxt.rox\n", COLOR_LIGHT_GREEN);
+    puts_color("  Usage: rxt <filename>\n", COLOR_WHITE);
+    return 0;
 }

@@ -122,6 +122,17 @@ typedef enum {
     TOK_GUI_FILL_ROUND, /* gui_fill_round                                   */
     TOK_GUI_MOUSE,      /* gui_mouse  – packed mouse state for window       */
 
+    /* Text buffer builtins (for rxt editor / io.ros) */
+    TOK_TBUF_OPEN,      /* tbuf_open                                        */
+    TOK_TBUF_CLOSE,     /* tbuf_close                                       */
+    TOK_TBUF_SAVE,      /* tbuf_save                                        */
+    TOK_TBUF_GETLINE,   /* tbuf_getline                                     */
+    TOK_TBUF_INPUT,     /* tbuf_input                                       */
+    TOK_TBUF_LINECOUNT, /* tbuf_linecount                                   */
+    TOK_TBUF_CURSOR,    /* tbuf_cursor                                      */
+    TOK_TBUF_NUMSTR,    /* tbuf_numstr                                      */
+    TOK_GETARG,         /* getarg                                           */
+
     /* Types */
     TOK_TYPE_I8,      /* i8                                               */
     TOK_TYPE_I16,     /* i16                                              */
