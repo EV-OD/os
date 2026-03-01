@@ -401,3 +401,33 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
 
     prev_lbtn = lbtn;
 }
+
+/* -------------------------------------------------------------------------
+ * wm_destroy_by_pid – destroy all windows owned by a process.
+ *
+ * Called from the scheduler when a user process dies so orphaned windows
+ * are cleaned up automatically.  Iterates backwards because wm_destroy
+ * compacts the wm_stack array.
+ * ------------------------------------------------------------------------- */
+
+void wm_destroy_by_pid(int pid)
+{
+    int i, found = 0;
+
+    if (pid <= 0) return;
+
+    for (i = wm_count - 1; i >= 0; i--) {
+        if (wm_stack[i] && wm_stack[i]->owner_pid == pid) {
+            log_info("[wm] auto-destroying orphaned window '%s' (owner pid=%d)",
+                     wm_stack[i]->title, pid);
+            wm_destroy(wm_stack[i]);
+            found = 1;
+        }
+    }
+
+    if (found) {
+        wm_invalidate_all();
+        wm_paint_all();
+        fb_flush();
+    }
+}

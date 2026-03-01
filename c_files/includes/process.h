@@ -58,8 +58,9 @@ typedef enum proc_state {
 
 /** Reason a process is in PROC_SLEEPING state. */
 typedef enum wait_reason {
-    WAIT_NONE = 0,   /**< Not sleeping / unspecified             */
-    WAIT_KEY  = 1    /**< Sleeping until a keyboard char arrives */
+    WAIT_NONE  = 0,  /**< Not sleeping / unspecified              */
+    WAIT_KEY   = 1,  /**< Sleeping until a keyboard char arrives  */
+    WAIT_CHILD = 2   /**< Sleeping until a child process exits    */
 } wait_reason_t;
 
 /* -------------------------------------------------------------------------
@@ -95,6 +96,7 @@ typedef struct process {
     /* --- Parent / wait relationship -------------------------------------- */
     unsigned int    parent_pid;   /**< PID of the process that spawned this   */
     int             waited;       /**< 1 = parent has collected exit_status   */
+    unsigned int    wait_child_pid; /**< PID of child being waited on (WAIT_CHILD) */
 
     /* --- Signal flags ---------------------------------------------------- */
     volatile int    killed;       /**< Non-zero: process should terminate ASAP */

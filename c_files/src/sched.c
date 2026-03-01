@@ -29,6 +29,7 @@
 #include "tss.h"
 #include "paging.h"
 #include "log.h"
+#include "gui/wm.h"
 
 /* -------------------------------------------------------------------------
  * Module-private state
@@ -392,6 +393,29 @@ unsigned int sched_tick(struct cpu_state *cpu, unsigned int interrupt)
      * sleeping_queue; they will be re-queued by sched_wake_waiters().
      */
     if (current_proc->state == PROC_DEAD) {
+        /* Wake any parent that is sleeping with WAIT_CHILD for this pid. */
+        {
+            unsigned int dead_pid = current_proc->pid;
+            process_t **pp = &sleeping_queue;
+            while (*pp) {
+                process_t *p = *pp;
+                if (p->wait_reason == WAIT_CHILD &&
+                    p->wait_child_pid == dead_pid) {
+                    *pp = p->next;
+                    p->wait_reason    = WAIT_NONE;
+                    p->wait_child_pid = 0;
+                    p->next = (process_t *)0;
+                    enqueue_sorted(p);
+                } else {
+                    pp = &p->next;
+                }
+            }
+            /* Destroy any orphaned windows owned by the dead process. */
+            if (current_proc->is_user) {
+                wm_destroy_by_pid((int)dead_pid);
+            }
+        }
+
         next = dequeue_min();
         if (!next) {
             /*

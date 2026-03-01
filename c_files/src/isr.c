@@ -6,6 +6,7 @@
 #include "sched.h"
 #include "pit.h"
 #include "process.h"
+#include "log.h"
 
 static isr_handler_t handlers[IDT_NUM_ENTRIES];
 
@@ -76,6 +77,58 @@ static void page_fault_handler(struct cpu_state *cpu, struct stack_state *stack,
 
     /* Kernel-mode page fault – unrecoverable.  Halt the CPU. */
     serial_write("[#PF] KERNEL PAGE FAULT – halting.\r\n");
+    for (;;) { __asm__ volatile("cli; hlt"); }
+}
+
+/* -------------------------------------------------------------------------
+ * Generic CPU exception handler (for all exceptions without a dedicated
+ * handler: #DE, #UD, #GP, #SS, etc.)
+ *
+ * Logs the fault vector and faulting EIP, then kills the current process
+ * if it was running in user mode.
+ * ------------------------------------------------------------------------- */
+static const char *exception_names[] = {
+    [0]  = "#DE Divide Error",
+    [6]  = "#UD Invalid Opcode",
+    [8]  = "#DF Double Fault",
+    [10] = "#TS Invalid TSS",
+    [11] = "#NP Segment Not Present",
+    [12] = "#SS Stack-Segment Fault",
+    [13] = "#GP General Protection",
+};
+
+static void generic_exception_handler(struct cpu_state *cpu, struct stack_state *stack,
+                                      unsigned int interrupt)
+{
+    (void)cpu;
+
+    char buf[128];
+    const char *name = (interrupt < sizeof(exception_names)/sizeof(exception_names[0])
+                        && exception_names[interrupt])
+                       ? exception_names[interrupt] : "Exception";
+
+    sprintf(buf, "[FAULT] %s (vec=%d) EIP=0x%x CS=0x%x err=0x%x",
+            name, (int)interrupt, stack->eip, stack->cs, stack->error_code);
+    serial_write(buf);
+    serial_write("\r\n");
+
+    log_error("[FAULT] %s (vec=%d) EIP=0x%x err=0x%x",
+              name, (int)interrupt, stack->eip, stack->error_code);
+
+    /* If the fault came from user mode (CS RPL bits != 0), kill the process. */
+    if (stack->cs & 3) {
+        process_t *cur = sched_current();
+        if (cur) {
+            log_error("[FAULT] killing user process '%s' pid=%d",
+                      cur->name ? cur->name : "?", (int)cur->pid);
+            cur->exit_status = -(int)interrupt;
+            cur->state       = PROC_DEAD;
+            for (;;) { __asm__ volatile("sti; hlt"); }
+        }
+    }
+
+    /* Kernel-mode fault – unrecoverable. */
+    serial_write("[FAULT] KERNEL EXCEPTION – halting.\r\n");
     for (;;) { __asm__ volatile("cli; hlt"); }
 }
 
@@ -160,6 +213,15 @@ void isr_install(void)
 
     /* Register the page-fault handler (#PF, vector 14) for diagnostics. */
     register_interrupt_handler(14, page_fault_handler);
+
+    /* Register the generic exception handler for common CPU faults. */
+    register_interrupt_handler(0,  generic_exception_handler); /* #DE Divide Error    */
+    register_interrupt_handler(6,  generic_exception_handler); /* #UD Invalid Opcode  */
+    register_interrupt_handler(8,  generic_exception_handler); /* #DF Double Fault    */
+    register_interrupt_handler(10, generic_exception_handler); /* #TS Invalid TSS     */
+    register_interrupt_handler(11, generic_exception_handler); /* #NP Seg Not Present */
+    register_interrupt_handler(12, generic_exception_handler); /* #SS Stack Fault     */
+    register_interrupt_handler(13, generic_exception_handler); /* #GP General Prot.   */
 
     /* Syscall gate – DPL=3 so ring-3 code can invoke int 0x80. */
     idt_set_gate(128, (unsigned int)isr128, GDT_KERNEL_CODE_SELECTOR,

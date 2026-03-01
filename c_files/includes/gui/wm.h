@@ -171,4 +171,12 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns);
  */
 void wm_invalidate_all(void);
 
+/**
+ * Destroy all windows owned by a specific process.
+ * Called by the scheduler when a user process dies to clean up orphaned windows.
+ *
+ * @param pid  PID of the deceased process.
+ */
+void wm_destroy_by_pid(int pid);
+
 #endif /* GUI_WM_H */

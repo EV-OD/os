@@ -48,6 +48,7 @@
 #include "kheap.h"
 #include "string.h"
 #include "log.h"
+#include "sched.h"
 
 /* -------------------------------------------------------------------------
  * User-mode segment selectors with RPL=3
@@ -113,9 +114,33 @@ int process_wait(unsigned int child_pid)
     process_t *child = process_find(child_pid);
     if (!child) return -1;
 
-    /* Spin until the child dies (scheduler keeps running via PIT IRQ). */
-    while (child->state != PROC_DEAD) {
-        __asm__ volatile("sti; hlt");
+    /* If the child is already dead, return immediately. */
+    if (child->state == PROC_DEAD) {
+        child->waited = 1;
+        return child->exit_status;
+    }
+
+    /* Put the calling process to sleep until the child exits.
+     * The scheduler (sched_tick) detects WAIT_CHILD processes when a
+     * child dies and wakes the parent by moving it to the run queue. */
+    process_t *cur = sched_current();
+    if (cur) {
+        cur->wait_child_pid = child_pid;
+        __asm__ volatile("sti");
+        for (;;) {
+            if (child->state == PROC_DEAD) break;
+            cur->state       = PROC_SLEEPING;
+            cur->wait_reason = WAIT_CHILD;
+            __asm__ volatile("hlt");
+        }
+        cur->wait_reason   = WAIT_NONE;
+        cur->wait_child_pid = 0;
+    } else {
+        /* Called from the kernel main thread (not a scheduled process).
+         * Busy-wait with sti;hlt – sched_tick handles the kernel_wait_esp. */
+        while (child->state != PROC_DEAD) {
+            __asm__ volatile("sti; hlt");
+        }
     }
 
     child->waited = 1;
@@ -196,6 +221,7 @@ process_t *process_create(const char *name, void (*entry)(void), int nice)
     proc->exit_status = 0;
     proc->parent_pid  = 0;
     proc->waited      = 0;
+    proc->wait_child_pid = 0;
 
     /*
      * Build the initial stack frame.
@@ -343,6 +369,7 @@ process_t *process_create_user(const char *name,
     proc->exit_status = 0;
     proc->parent_pid  = 0;
     proc->waited      = 0;
+    proc->wait_child_pid = 0;
 
     /*
      * Build the initial ring-3 iret frame on the kernel stack.
