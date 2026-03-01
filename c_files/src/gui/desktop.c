@@ -16,13 +16,22 @@
 #include "gui/color.h"
 #include "gui/mouse.h"
 #include "gui/wm.h"
+#include "gui/gui_term.h"
 #include "keyboard.h"
 #include "log.h"
 #include "string.h"
-#include "pit.h"   /* pit_get_ticks() – frame rate limiter */
+#include "pit.h"
+#include "process.h"
+#include "sched.h"
+#include "terminal.h"
+#include "shell.h"
+#include "rox.h"   /* pit_get_ticks() – frame rate limiter */
 
 /* Target frame period: 2 ticks × 10 ms = ~50 fps */
 #define FRAME_TICKS  2u
+
+/* Double-click threshold: 50 ticks = 500 ms */
+#define DBLCLICK_TICKS 50u
 
 /* -------------------------------------------------------------------------
  * Internal state
@@ -39,6 +48,69 @@ typedef struct {
 
 static icon_slot_t s_icons[MAX_ICONS];
 static int         s_icon_count = 0;
+
+/* Double-click tracking */
+static int          s_last_click_icon = -1;
+static unsigned int s_last_click_tick = 0;
+
+/* -------------------------------------------------------------------------
+ * Terminal spawn state
+ * A pending terminal_t* is stored here so the kernel shell task can pick
+ * it up without needing a closure.  Only one spawn may be in-flight at a
+ * time; the flag is cleared by gui_shell_task() on entry.
+ * ------------------------------------------------------------------------- */
+static terminal_t   *s_spawn_pending_term = (void *)0;
+static int           s_spawn_term_offset  = 0;   /* cascade new windows */
+
+static void gui_shell_task(void)
+{
+    terminal_t *t = s_spawn_pending_term;
+    s_spawn_pending_term = (void *)0;
+    if (t) term_set_active(t);
+    shell_run();
+}
+
+static void rxt_launch_task(void)
+{
+    rox_load_and_run("/bin/rxt.rox", 0, (void *)0);
+}
+
+void desktop_spawn_terminal(void)
+{
+    if (s_spawn_pending_term) return;  /* already one pending */
+
+    int sw = (int)fb_width();
+    int sh = (int)fb_height();
+    int step = (s_spawn_term_offset % 5) * 24;
+    s_spawn_term_offset++;
+
+    int wx = 4 + step;
+    int wy = 4 + step;
+    int ww = sw - wx - 8 - step;
+    int wh = sh - TASKBAR_H - wy - 8 - step;
+    if (ww < 400) ww = 400;
+    if (wh < 300) wh = 300;
+
+    wm_window_t *win = wm_create(wx, wy, ww, wh, "Terminal");
+    if (!win) return;
+
+    terminal_t *t = gui_term_create(win);
+    if (!t) { wm_destroy(win); return; }
+
+    s_spawn_pending_term = t;
+    process_t *p = process_create("shell", gui_shell_task, 5);
+    if (p) {
+        sched_add(p);
+    } else {
+        s_spawn_pending_term = (void *)0;
+    }
+}
+
+void desktop_open_rxt(void)
+{
+    process_t *p = process_create("rxt-icon", rxt_launch_task, 5);
+    if (p) sched_add(p);
+}
 
 /* -------------------------------------------------------------------------
  * desktop_draw_wallpaper
@@ -74,6 +146,7 @@ void desktop_draw_wallpaper(void)
 
 void desktop_draw_taskbar(void)
 {
+    int i;
     int w   = (int)fb_width();
     int ty  = (int)fb_height() - TASKBAR_H;
 
@@ -87,6 +160,43 @@ void desktop_draw_taskbar(void)
                         COLOR_RGB(0x22, 0x55, 0xAA));
     font_draw_str(10, ty + (TASKBAR_H - FONT_H) / 2, "START",
                   COLOR_WHITE, COLOR_TRANSPARENT);
+
+    /* Window buttons – one per open window */
+    {
+        int nx = TASKBAR_BTN_X0;
+        int n  = wm_get_count();
+        wm_window_t *focused = wm_focused();
+
+        for (i = 0; i < n; i++) {
+            wm_window_t *win = wm_get_at(i);
+            if (!win) { nx += TASKBAR_BTN_W + 4; continue; }
+
+            /* Stop if we run out of taskbar space */
+            if (nx + TASKBAR_BTN_W > w - 4) break;
+
+            int is_focused = (win == focused);
+            color_t btn_col = is_focused
+                ? COLOR_RGB(0x33, 0x66, 0xCC)
+                : COLOR_RGB(0x20, 0x20, 0x30);
+
+            gfx_fill_round_rect(nx, ty + 3, TASKBAR_BTN_W, TASKBAR_H - 6, 3, btn_col);
+            gfx_draw_rect(nx, ty + 3, TASKBAR_BTN_W, TASKBAR_H - 6,
+                          is_focused ? COLOR_RGB(0x55,0x88,0xFF)
+                                     : COLOR_RGB(0x44,0x44,0x66));
+
+            /* Truncated title (max 14 chars) */
+            char trunc[16];
+            int  tl = 0;
+            while (win->title[tl] && tl < 14) { trunc[tl] = win->title[tl]; tl++; }
+            if (win->title[tl]) { trunc[tl++] = '.'; trunc[tl++] = '.'; }
+            trunc[tl] = '\0';
+
+            font_draw_str(nx + 6, ty + (TASKBAR_H - FONT_H) / 2,
+                          trunc, COLOR_WHITE, COLOR_TRANSPARENT);
+
+            nx += TASKBAR_BTN_W + 4;
+        }
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -132,10 +242,37 @@ void desktop_add_icon(int x, int y, const char *label,
 }
 
 /* -------------------------------------------------------------------------
- * Icon click detection helper
+ * check_taskbar_click – raised the clicked window
  * ------------------------------------------------------------------------- */
 
-static void check_icon_clicks(int mx, int my)
+static void check_taskbar_click(int mx, int my)
+{
+    int i;
+    int ty = (int)fb_height() - TASKBAR_H;
+    if (my < ty || my >= ty + TASKBAR_H) return;
+
+    int nx = TASKBAR_BTN_X0;
+    int n  = wm_get_count();
+    int w  = (int)fb_width();
+
+    for (i = 0; i < n; i++) {
+        wm_window_t *win = wm_get_at(i);
+        if (!win) { nx += TASKBAR_BTN_W + 4; continue; }
+        if (nx + TASKBAR_BTN_W > w - 4) break;
+
+        if (mx >= nx && mx < nx + TASKBAR_BTN_W) {
+            wm_raise(win);
+            return;
+        }
+        nx += TASKBAR_BTN_W + 4;
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * Icon click detection helper (double-click)
+ * ------------------------------------------------------------------------- */
+
+static void check_icon_clicks(int mx, int my, unsigned int now)
 {
     int i;
     for (i = 0; i < s_icon_count; i++) {
@@ -143,9 +280,21 @@ static void check_icon_clicks(int mx, int my)
         if (!ic->used) continue;
         if (mx >= ic->x && mx < ic->x + 48 &&
             my >= ic->y && my < ic->y + 48) {
-            if (ic->on_click) ic->on_click();
+            if (s_last_click_icon == i &&
+                (now - s_last_click_tick) < DBLCLICK_TICKS) {
+                /* Double-click – fire the action */
+                if (ic->on_click) ic->on_click();
+                s_last_click_icon = -1;   /* reset so triple-click is not a second dblclick */
+            } else {
+                /* First click – just record */
+                s_last_click_icon = i;
+                s_last_click_tick = now;
+            }
+            return;
         }
     }
+    /* Clicked on blank desktop – reset double-click state */
+    s_last_click_icon = -1;
 }
 
 /* -------------------------------------------------------------------------
@@ -201,8 +350,11 @@ void desktop_run(void)
                 }
                 if (!lbtn && prev_lbtn) {
                     int tb_y = (int)fb_height() - TASKBAR_H;
-                    if (ms.y < tb_y)
-                        check_icon_clicks(ms.x, ms.y);
+                    if (ms.y >= tb_y) {
+                        check_taskbar_click(ms.x, ms.y);
+                    } else {
+                        check_icon_clicks(ms.x, ms.y, now);
+                    }
                 }
             }
             prev_ms = ms;

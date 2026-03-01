@@ -74,6 +74,11 @@ int gui_launch(multiboot_info_t *mb)
     }
 
     desktop_init();
+
+    /* Desktop icons – double-click to open */
+    desktop_add_icon(16,  16, "Terminal", desktop_spawn_terminal);
+    desktop_add_icon(16,  84, "RXT",      desktop_open_rxt);
+
     log_info("[gui] gui_launch complete – GUI terminal active");
     return 0;
 }

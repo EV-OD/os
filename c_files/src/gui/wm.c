@@ -97,6 +97,7 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     /* Per-window key queue – must be zero so head==tail (empty) on first use */
     win->kq_head = 0;
     win->kq_tail = 0;
+    win->userdata = (void *)0;
 
     /* Push to front of Z-stack (shift others back by one) */
     for (i = wm_count; i > 0; i--)
@@ -490,6 +491,14 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
  * are cleaned up automatically.  Iterates backwards because wm_destroy
  * compacts the wm_stack array.
  * ------------------------------------------------------------------------- */
+
+int wm_get_count(void) { return wm_count; }
+
+wm_window_t *wm_get_at(int idx)
+{
+    if (idx < 0 || idx >= wm_count) return (void *)0;
+    return wm_stack[idx];
+}
 
 void wm_destroy_by_pid(int pid)
 {

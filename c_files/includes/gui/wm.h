@@ -75,6 +75,7 @@ struct wm_window {
     int _stack_idx;         /**< Position in wm_stack[]; managed by the WM.      */
     int no_drag;            /**< Non-zero: disables title-bar drag for this win.  */
     int owner_pid;          /**< PID of the process that owns this window (0=none). */
+    void *userdata;         /**< Optional per-window private pointer (e.g. gui_term_state_t *). */
 
     /* --- Drawing state ------------------------------------------------- */
     unsigned int pen_color; /**< Current stroke colour (used by line/rect/circle). */
@@ -204,5 +205,16 @@ void wm_invalidate_all(void);
  * @param pid  PID of the deceased process.
  */
 void wm_destroy_by_pid(int pid);
+
+/**
+ * Return the total number of windows currently in the Z-stack.
+ */
+int wm_get_count(void);
+
+/**
+ * Return the window at Z-stack index @p idx (0 = topmost/focused).
+ * Returns NULL if idx is out of range.
+ */
+wm_window_t *wm_get_at(int idx);
 
 #endif /* GUI_WM_H */

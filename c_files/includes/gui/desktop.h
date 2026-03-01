@@ -13,7 +13,13 @@
  * ========================================================================= */
 
 /* Height of the bottom taskbar in pixels. */
-#define TASKBAR_H  32
+#define TASKBAR_H      32
+
+/* Pixels reserved at the start of the taskbar for the START button. */
+#define TASKBAR_BTN_X0 68
+
+/* Width of each window button in the taskbar. */
+#define TASKBAR_BTN_W  130
 
 /* -------------------------------------------------------------------------
  * Desktop icons
@@ -70,5 +76,17 @@ void desktop_draw_taskbar(void);
  * Automatically marks all WM windows as dirty.
  */
 void desktop_draw_wallpaper(void);
+
+/**
+ * Spawn a new GUI terminal window + shell task.
+ * Called from the Terminal icon double-click callback.
+ */
+void desktop_spawn_terminal(void);
+
+/**
+ * Launch a new rxt editor instance (non-blocking: spawns a kernel task).
+ * Called from the RXT icon double-click callback.
+ */
+void desktop_open_rxt(void);
 
 #endif /* GUI_DESKTOP_H */

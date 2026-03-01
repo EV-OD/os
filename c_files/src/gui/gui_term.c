@@ -27,6 +27,9 @@
 #define GT_FG  COLOR_RGB(0xCC, 0xFF, 0xCC)   /* Matrix-green foreground */
 #define GT_BG  COLOR_RGB(0x00, 0x08, 0x00)   /* Near-black background   */
 
+/* Key ring-buffer capacity (per terminal instance) */
+#define GT_KEY_BUF 128
+
 typedef struct {
     /* Back-reference to the WM window */
     wm_window_t *win;
@@ -46,6 +49,11 @@ typedef struct {
     /* Cursor blink */
     int cursor_visible;
     unsigned int blink_tick;
+
+    /* Per-instance key ring-buffer */
+    volatile char         key_buf[GT_KEY_BUF];
+    volatile unsigned int key_head;
+    volatile unsigned int key_tail;
 } gui_term_state_t;
 
 /* -------------------------------------------------------------------------
@@ -63,28 +71,23 @@ static int  gt_read_line(char *buf, unsigned int max);
 static void gt_clear(void);
 static int  gt_tprintf(const char *fmt, ...);
 
-/* Active terminal state (single terminal per session) */
-static gui_term_state_t *s_gt = (void *)0;
+/*
+ * GT_FROM_TERM – recover gui_term_state_t * from an embedded terminal_t *.
+ * Since gui_term_state_t::term is at a fixed offset, pointer arithmetic
+ * lets each vtable function find its owning instance via term_active().
+ */
+#define GT_FROM_TERM(t) \
+    ((gui_term_state_t *)((char *)(t) - __builtin_offsetof(gui_term_state_t, term)))
 
 /* -------------------------------------------------------------------------
- * Key ring buffer – filled by gt_on_key (called from wm_dispatch_key),
- * drained by gt_get_char (called from shell_run / readline).
- * With a preemptive scheduler the compositor task reads the keyboard and
- * dispatches keys here; the shell task blocks on this buffer.
+ * Key ring buffer helpers (per-instance)
  * ------------------------------------------------------------------------- */
-#define GT_KEY_BUF 128
-static volatile char         s_key_buf[GT_KEY_BUF];
-static volatile unsigned int s_key_head = 0;
-static volatile unsigned int s_key_tail = 0;
-
-static void gt_on_key(wm_window_t *win, char c)
+static void gt_key_push(gui_term_state_t *gt, char c)
 {
-    unsigned int next;
-    (void)win;
-    next = (s_key_tail + 1u) % GT_KEY_BUF;
-    if (next != s_key_head) {   /* drop if full */
-        s_key_buf[s_key_tail] = c;
-        s_key_tail = next;
+    unsigned int next = (gt->key_tail + 1u) % GT_KEY_BUF;
+    if (next != gt->key_head) {
+        gt->key_buf[gt->key_tail] = c;
+        gt->key_tail = next;
     }
 }
 
@@ -182,15 +185,24 @@ static void gt_emit(gui_term_state_t *gt, char c, color_t fg, color_t bg)
 }
 
 /* -------------------------------------------------------------------------
+ * on_key / on_paint callbacks – dispatched by window userdata
+ * ------------------------------------------------------------------------- */
+
+static void gt_on_key(wm_window_t *win, char c)
+{
+    gui_term_state_t *gt = (gui_term_state_t *)win->userdata;
+    if (!gt) return;
+    gt_key_push(gt, c);
+}
+
+/* -------------------------------------------------------------------------
  * Paint callback (called by WM when window is dirty)
  * ------------------------------------------------------------------------- */
 
 static void gt_paint(wm_window_t *win)
 {
-    /* Render the character grid directly into the framebuffer back-buffer
-     * so no separate canvas allocation is needed. */
-    (void)win;
-    if (s_gt) gt_render_grid(s_gt);
+    gui_term_state_t *gt = (gui_term_state_t *)win->userdata;
+    if (gt) gt_render_grid(gt);
 }
 
 /* Render the full grid directly into the framebuffer back-buffer.
@@ -255,49 +267,56 @@ static void gt_render_grid(gui_term_state_t *gt)
 
 static void gt_put_char(char c)
 {
-    if (!s_gt) return;
-    gt_emit(s_gt, c, GT_FG, GT_BG);
-    s_gt->win->dirty = 1;   /* compositor renders next frame */
+    terminal_t *t = term_active();
+    if (!t) return;
+    gui_term_state_t *gt = GT_FROM_TERM(t);
+    gt_emit(gt, c, GT_FG, GT_BG);
+    gt->win->dirty = 1;
 }
 
 static void gt_put_char_color(char c, unsigned char vga_fg)
 {
-    if (!s_gt) return;
-    gt_emit(s_gt, c, color_from_vga(vga_fg & 0x0F), GT_BG);
-    s_gt->win->dirty = 1;
+    terminal_t *t = term_active();
+    if (!t) return;
+    gui_term_state_t *gt = GT_FROM_TERM(t);
+    gt_emit(gt, c, color_from_vga(vga_fg & 0x0F), GT_BG);
+    gt->win->dirty = 1;
 }
 
 static void gt_put_string(const char *s)
 {
-    if (!s_gt || !s) return;
-    while (*s) gt_emit(s_gt, *s++, GT_FG, GT_BG);
-    s_gt->win->dirty = 1;
+    terminal_t *t = term_active();
+    if (!t || !s) return;
+    gui_term_state_t *gt = GT_FROM_TERM(t);
+    while (*s) gt_emit(gt, *s++, GT_FG, GT_BG);
+    gt->win->dirty = 1;
 }
 
 static void gt_put_string_color(const char *s, unsigned char vga_fg)
 {
+    terminal_t *t = term_active();
+    if (!t || !s) return;
+    gui_term_state_t *gt = GT_FROM_TERM(t);
     color_t fg = color_from_vga(vga_fg & 0x0F);
-    if (!s_gt || !s) return;
-    while (*s) gt_emit(s_gt, *s++, fg, GT_BG);
-    s_gt->win->dirty = 1;
+    while (*s) gt_emit(gt, *s++, fg, GT_BG);
+    gt->win->dirty = 1;
 }
 
 /**
- * Blocking get_char – reads from the key buffer that is filled by the
- * compositor task via wm_dispatch_key → gt_on_key.
- * Just spins; the PIT-driven scheduler preempts into the compositor task
- * which pumps the keyboard ring buffer into this buffer.
+ * Blocking get_char – reads from this terminal instance’s key buffer.
+ * The compositor fills it via wm_dispatch_key → gt_on_key.
  */
 static int gt_get_char(void)
 {
-    while (s_key_head == s_key_tail) {
-        /* yield to compositor task – scheduler will context-switch */
+    terminal_t *t = term_active();
+    if (!t) return -1;
+    gui_term_state_t *gt = GT_FROM_TERM(t);
+    while (gt->key_head == gt->key_tail) {
+        /* yield – PIT-driven scheduler preempts to compositor */
     }
-    {
-        char c = s_key_buf[s_key_head];
-        s_key_head = (s_key_head + 1u) % GT_KEY_BUF;
-        return (int)(unsigned char)c;
-    }
+    char c = gt->key_buf[gt->key_head];
+    gt->key_head = (gt->key_head + 1u) % GT_KEY_BUF;
+    return (int)(unsigned char)c;
 }
 
 static int gt_read_line(char *buf, unsigned int max)
@@ -330,15 +349,17 @@ static int gt_read_line(char *buf, unsigned int max)
 static void gt_clear(void)
 {
     int row, col;
-    if (!s_gt) return;
-    for (row = 0; row < s_gt->rows; row++)
-        for (col = 0; col < s_gt->cols; col++) {
-            *cell_char(s_gt, col, row) = ' ';
-            *cell_fg  (s_gt, col, row) = GT_FG;
-            *cell_bg  (s_gt, col, row) = GT_BG;
+    terminal_t *t = term_active();
+    if (!t) return;
+    gui_term_state_t *gt = GT_FROM_TERM(t);
+    for (row = 0; row < gt->rows; row++)
+        for (col = 0; col < gt->cols; col++) {
+            *cell_char(gt, col, row) = ' ';
+            *cell_fg  (gt, col, row) = GT_FG;
+            *cell_bg  (gt, col, row) = GT_BG;
         }
-    s_gt->cur_col = s_gt->cur_row = 0;
-    s_gt->win->dirty = 1;   /* compositor renders next frame */
+    gt->cur_col = gt->cur_row = 0;
+    gt->win->dirty = 1;
 }
 
 static int gt_tprintf(const char *fmt, ...)
@@ -415,8 +436,11 @@ terminal_t *gui_term_create(wm_window_t *win)
     win->on_paint = gt_paint;
     win->on_key   = gt_on_key;
 
-    /* Register as active global state */
-    s_gt = gt;
+    /* Register in window userdata so on_key / on_paint can find this instance */
+    win->userdata = gt;
+    /* Also init key buffer indices (kmalloc returns zeroed memory but be explicit) */
+    gt->key_head = 0;
+    gt->key_tail = 0;
 
     gt_render_grid(gt);
     win->dirty = 1;
@@ -438,7 +462,7 @@ void gui_term_destroy(terminal_t *t)
 
     gt = (gui_term_state_t *)((char *)t - __builtin_offsetof(gui_term_state_t, term));
 
-    if (s_gt == gt) s_gt = (void *)0;
+    if (gt->win) gt->win->userdata = (void *)0;
 
     kfree(gt->cells_char);
     kfree(gt->cells_fg);
