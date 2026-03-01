@@ -356,6 +356,66 @@ static void emit_stmt(Codegen *cg, AstNode *n) {
             cg->loop_depth--;
             break;
         }
+        case AST_FOR: {
+            if (!n->range) break;
+            int saved_locals = cg->local_count;
+            int saved_brk    = cg->break_fixup_count;
+            int saved_depth  = cg->loop_depth++;
+            LoopFrame *lf    = &cg->loop_stack[saved_depth];
+            lf->break_fixup_start = saved_brk;
+
+            /* 1. Init: evaluate lo, store in loop variable */
+            emit_expr(cg, n->range->left);   /* lo → eax */
+            VarEntry *lv = &cg->locals[cg->local_count++];
+            strncpy(lv->name, n->name, MAX_IDENT_LEN - 1);
+            lv->slot     = cg->next_slot++;
+            lv->is_param = 0;
+            lv->type     = TY_I32;
+            emit8(cg, 0x89); emit8(cg, 0x85); emit32(cg, -(lv->slot * 4)); /* mov [var], eax */
+
+            /* 2. Condition: jge exit when var >= hi */
+            int loop_top = cg->code_len;
+
+            /* Jump over the continue-trampoline into body */
+            int over_tramp = emit_jmp_fwd(cg);
+
+            /* Continue-trampoline: landed on by 'continue', jumps to increment */
+            int trampoline_pos = cg->code_len;
+            lf->continue_target = trampoline_pos;   /* continue → trampoline → increment */
+            int tramp_to_incr   = emit_jmp_fwd(cg); /* jmp increment (patched below)      */
+
+            /* over-trampoline lands here */
+            resolve_fwd(cg, over_tramp);
+
+            /* Condition check */
+            emit8(cg, 0x8B); emit8(cg, 0x8D); emit32(cg, -(lv->slot * 4)); /* mov ecx, [var] */
+            emit_expr(cg, n->range->right);          /* hi → eax */
+            emit8(cg, 0x39); emit8(cg, 0xC1);        /* cmp ecx, eax */
+            int jge_pos = emit_jcc_fwd(cg, 0x8D);   /* jge exit */
+
+            /* 3. Body */
+            emit_stmt(cg, n->body);
+
+            /* 4. Increment: patch trampoline here, then inc [var] */
+            resolve_fwd(cg, tramp_to_incr);          /* trampoline → increment */
+            emit8(cg, 0xFF); emit8(cg, 0x85); emit32(cg, -(lv->slot * 4)); /* inc [var] */
+
+            /* 5. Back to condition */
+            emit_jmp(cg, loop_top);
+
+            /* 6. Exit label */
+            resolve_fwd(cg, jge_pos);
+
+            /* 7. Resolve break fixups */
+            cg->loop_depth = saved_depth;
+            for (int bi = lf->break_fixup_start; bi < cg->break_fixup_count; bi++)
+                resolve_fwd(cg, cg->break_fixup_indices[bi]);
+            cg->break_fixup_count = saved_brk;
+
+            /* 8. Remove loop variable from scope */
+            cg->local_count = saved_locals;
+            break;
+        }
         case AST_BREAK:
             if (cg->loop_depth > 0) {
                 cg->break_fixup_indices[cg->break_fixup_count++] = emit_jmp_fwd(cg);
@@ -425,6 +485,12 @@ int codegen_run(Codegen *cg, AstNode *prog) {
             FuncEntry *f = NULL;
             for (int k=0; k<cg->func_count; k++) {
                 if (strcmp(cg->funcs[k].name, n->name) == 0) { f = &cg->funcs[k]; break; }
+            }
+            if (!f) {
+                /* Function was dropped in prescan (exceeded MAX_FUNCTIONS) */
+                error_report("codegen", "function not registered (MAX_FUNCTIONS exceeded)", n->line, 0);
+                cg->had_error = 1;
+                continue;
             }
             f->code_offset = cg->code_len;
             /* Function prologue */

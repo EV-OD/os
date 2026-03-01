@@ -45,9 +45,13 @@
  * tables are required for the initial implementation.  The heap starts
  * at 0xC0300000 and extends to 0xC0400000 (1 MB of initial heap space).
  * ------------------------------------------------------------------------- */
-#define KHEAP_VSTART  0xC0500000u   /* virtual start of heap (above kernel BSS ~0xC03F8D40)  */
-#define KHEAP_VEND    0xC1500000u   /* virtual end  of heap (16 MB available)                  */
-#define KHEAP_SIZE    (KHEAP_VEND - KHEAP_VSTART)
+/* Heap start is computed dynamically in kheap_init() from the kernel_virtual_end
+ * linker symbol so it always sits above the kernel BSS no matter how large the
+ * compiler's static arrays grow.  KHEAP_VSTART_DEFAULT is a safe fallback only. */
+#define KHEAP_VSTART_DEFAULT  0xC0800000u   /* fallback if symbol unavailable        */
+#define KHEAP_VEND            0xC3000000u   /* 48 MB into kernel virt (needs 48 MB RAM) */
+#define KHEAP_INITIAL_SIZE    (4u * 1024u * 1024u)  /* 4 MB committed at boot          */
+#define KHEAP_EXPAND_SIZE     (2u * 1024u * 1024u)  /* 2 MB per on-demand expansion    */
 
 /* -------------------------------------------------------------------------
  * Magic number – placed in every block header.

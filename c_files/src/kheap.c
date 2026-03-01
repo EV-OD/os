@@ -37,12 +37,24 @@
 #include "kheap.h"
 #include "log.h"
 
+/* linker-exported symbol: virtual address just past the kernel .bss section */
+extern unsigned int kernel_virtual_end;
+
 /* =========================================================================
  * Internal state
  * ========================================================================= */
 
-/** Pointer to the first block header in the heap. */
+/** Pointer to the first block header in the heap (linked list head). */
 static block_header_t *heap_head = (block_header_t *)0;
+
+/** Virtual address of the current committed heap end.
+ *  Memory between heap_head and heap_end is accessible (backed by PSE pages).
+ *  kheap_expand() advances this toward KHEAP_VEND when more space is needed. */
+static unsigned int heap_end = 0;
+
+/* forward declarations */
+static void coalesce(block_header_t *hptr);
+static int  kheap_expand(unsigned int min_size);
 
 /* =========================================================================
  * kpanic – minimal kernel panic helper (halt + log).
@@ -65,22 +77,101 @@ static void kpanic(char *msg)
 void kheap_init(void)
 {
     block_header_t *first;
+    unsigned int    hstart;
 
     /*
-     * Place a single all-free block that spans the entire heap region.
-     * The data size is the full region minus the header overhead.
+     * Derive heap start from the linker-exported kernel_virtual_end symbol,
+     * page-aligned upward.  This ensures the heap never overlaps kernel BSS
+     * (critical when large compiler static arrays are in .bss).
      */
-    first = (block_header_t *)KHEAP_VSTART;
+    hstart = ((unsigned int)&kernel_virtual_end + 0xFFFu) & ~0xFFFu;
+    if (hstart < KHEAP_VSTART_DEFAULT)
+        hstart = KHEAP_VSTART_DEFAULT;
+
+    if (hstart >= KHEAP_VEND) {
+        log_error("[kheap] kernel image too large: BSS end=0x%x >= KHEAP_VEND=0x%x –– heap disabled",
+                  (unsigned int)&kernel_virtual_end, KHEAP_VEND);
+        return;
+    }
+
+    /*
+     * Commit the initial fixed block.  The virtual range [hstart, KHEAP_VEND)
+     * is already backed by 4 MB PSE pages installed by paging_map_full_kernel_ram()
+     * at boot, so no page allocation is needed here.
+     */
+    first = (block_header_t *)hstart;
     first->magic   = KHEAP_MAGIC;
-    first->size    = KHEAP_SIZE - sizeof(block_header_t);
+    first->size    = KHEAP_INITIAL_SIZE - (unsigned int)sizeof(block_header_t);
     first->is_free = 1;
     first->next    = (block_header_t *)0;
     first->prev    = (block_header_t *)0;
 
     heap_head = first;
+    heap_end  = hstart + KHEAP_INITIAL_SIZE;
 
-    log_info("[kheap] initialised: virt [0x%x – 0x%x) total %u bytes",
-             KHEAP_VSTART, KHEAP_VEND, KHEAP_SIZE);
+    log_info("[kheap] init: start=0x%x end=0x%x initial=%u KB  capacity=%u KB",
+             hstart, KHEAP_VEND,
+             KHEAP_INITIAL_SIZE / 1024u,
+             (KHEAP_VEND - hstart) / 1024u);
+}
+
+/* =========================================================================
+ * kheap_expand – grow the heap by mapping more of the pre-reserved virtual
+ *               address range into the free-block list.
+ *
+ * The virtual range [heap_end, KHEAP_VEND) is already backed by 4 MB PSE
+ * pages set up at boot by paging_map_full_kernel_ram(), so expansion only
+ * requires linking a new free block into the list – no PFA/page-table
+ * allocation needed.
+ *
+ * Returns 0 on success, -1 when no virtual space remains.
+ * ========================================================================= */
+static int kheap_expand(unsigned int min_size)
+{
+    block_header_t *new_blk;
+    block_header_t *tail;
+    unsigned int    expand;
+
+    /* Choose an expansion size: at least KHEAP_EXPAND_SIZE or enough for request */
+    expand = KHEAP_EXPAND_SIZE;
+    if (min_size + (unsigned int)sizeof(block_header_t) > expand)
+        expand = (min_size + (unsigned int)sizeof(block_header_t) + 0xFFFu) & ~0xFFFu;
+
+    /* Check virtual address budget */
+    if (heap_end >= KHEAP_VEND) {
+        log_error("[kheap] kheap_expand: virtual space exhausted (heap_end=0x%x)", heap_end);
+        return -1;
+    }
+    if (expand > KHEAP_VEND - heap_end)
+        expand = KHEAP_VEND - heap_end;
+    if (expand < (unsigned int)sizeof(block_header_t) + 4u)
+        return -1;
+
+    /* Carve new free block at the current heap end */
+    new_blk = (block_header_t *)heap_end;
+    new_blk->magic   = KHEAP_MAGIC;
+    new_blk->size    = expand - (unsigned int)sizeof(block_header_t);
+    new_blk->is_free = 1;
+    new_blk->next    = (block_header_t *)0;
+    new_blk->prev    = (block_header_t *)0;
+
+    /* Append to the tail of the free-block list */
+    if (!heap_head) {
+        heap_head = new_blk;
+    } else {
+        tail = heap_head;
+        while (tail->next) tail = tail->next;
+        tail->next    = new_blk;
+        new_blk->prev = tail;
+        /* Merge with tail if it is free (avoids fragmentation at the boundary) */
+        if (tail->is_free)
+            coalesce(tail);
+    }
+
+    heap_end += expand;
+    log_info("[kheap] expanded +%u KB  →  heap_end=0x%x  (%u KB remaining)",
+             expand / 1024u, heap_end, (KHEAP_VEND - heap_end) / 1024u);
+    return 0;
 }
 
 /* =========================================================================
@@ -202,7 +293,13 @@ void *kmalloc(unsigned int size)
 
     hptr = find_free_block(size);
     if (!hptr) {
-        log_error("[kheap] kmalloc(%u): out of heap memory", size);
+        /* Heap exhausted — try to grow before failing */
+        if (kheap_expand(size) == 0)
+            hptr = find_free_block(size);
+    }
+    if (!hptr) {
+        log_error("[kheap] kmalloc(%u): heap exhausted (end=0x%x max=0x%x)",
+                  size, heap_end, (unsigned int)KHEAP_VEND);
         return (void *)0;
     }
 
