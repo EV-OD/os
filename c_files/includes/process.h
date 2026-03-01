@@ -105,6 +105,9 @@ typedef struct process {
     int             argc;         /**< Number of args (0 if unused)           */
     const char     *args[8];      /**< Argument strings (kernel-owned copies) */
 
+    /* --- Bound terminal (per-process, overrides global term_active) ------ */
+    void           *bound_term;   /**< terminal_t* for this process, or NULL  */
+
     /* --- Linked list for run queue --------------------------------------- */
     struct process *next;         /**< Next process in the run queue (or NULL)*/
 } process_t;

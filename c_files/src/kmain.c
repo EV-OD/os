@@ -47,6 +47,7 @@ multiboot_info_t *g_multiboot_info = (multiboot_info_t *)0;
 
 #ifdef GUI_MODE
 #include "gui/desktop.h"
+#include "terminal.h"
 #include "gui/wm.h"
 #include "gui/gui_term.h"
 #include "terminal.h"
@@ -61,7 +62,15 @@ multiboot_info_t *g_multiboot_info = (multiboot_info_t *)0;
  * The PIT at 10 ms preempts between them via the CFS scheduler.
  */
 static void gui_compositor_task(void) { desktop_run(); }
-static void gui_shell_task(void)      { shell_run();   }
+static void gui_shell_task(void)
+{
+    /* Bind the currently active terminal to this process so that output
+     * from this shell always goes to terminal-1 even after new terminals
+     * are spawned and term_active() is redirected. */
+    process_t *me = sched_current();
+    if (me) me->bound_term = (void *)term_active();
+    shell_run();
+}
 #endif
 
 /* -------------------------------------------------------------------------

@@ -223,6 +223,8 @@ process_t *process_create(const char *name, void (*entry)(void), int nice)
     proc->waited      = 0;
     proc->wait_child_pid = 0;
     proc->killed    = 0;
+    proc->argc      = 0;
+    proc->bound_term = (void *)0;
 
     /*
      * Build the initial stack frame.
@@ -372,6 +374,8 @@ process_t *process_create_user(const char *name,
     proc->waited      = 0;
     proc->wait_child_pid = 0;
     proc->killed      = 0;
+    proc->argc        = 0;
+    proc->bound_term  = (void *)0;
 
     /*
      * Build the initial ring-3 iret frame on the kernel stack.

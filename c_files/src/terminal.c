@@ -13,6 +13,8 @@
 
 #include "terminal.h"
 #include "stdio.h"   /* putchar, puts, getchar, readline, fb_clear, printf */
+#include "sched.h"   /* sched_current() */
+#include "process.h" /* process_t.bound_term */
 
 /* -------------------------------------------------------------------------
  * Active-terminal singleton
@@ -21,6 +23,11 @@ static terminal_t *s_active = (terminal_t *)0;
 
 terminal_t *term_active(void)
 {
+    /* If the running process has a bound terminal, use it.
+     * This ensures each shell instance writes only to its own window. */
+    process_t *cur = sched_current();
+    if (cur && cur->bound_term)
+        return (terminal_t *)cur->bound_term;
     return s_active;
 }
 

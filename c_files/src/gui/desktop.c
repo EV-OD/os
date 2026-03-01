@@ -59,6 +59,9 @@ static unsigned int s_last_click_tick = 0;
 /* Trampoline state for path-based icon launch (one at a time) */
 static char s_icon_launch_path[256];
 
+/* Set when icons are added so desktop_run redraws the background. */
+static int  s_icons_dirty = 0;
+
 static void icon_rox_task(void)
 {
     char lpath[256];
@@ -81,7 +84,14 @@ static void gui_shell_task(void)
 {
     terminal_t *t = s_spawn_pending_term;
     s_spawn_pending_term = (void *)0;
-    if (t) term_set_active(t);
+    if (t) {
+        /* Bind this terminal to the running process so output is never
+         * mixed with other shell instances regardless of focus. */
+        process_t *me = sched_current();
+        if (me) me->bound_term = (void *)t;
+        /* Also set as the keyboard-focus active terminal. */
+        term_set_active(t);
+    }
     shell_run();
 }
 
@@ -94,17 +104,23 @@ void desktop_spawn_terminal(void)
 {
     if (s_spawn_pending_term) return;  /* already one pending */
 
-    int sw = (int)fb_width();
-    int sh = (int)fb_height();
-    int step = (s_spawn_term_offset % 5) * 24;
+    /* Spawn cascading windows: 640×420.  Offset shifts each new window
+     * 30px right and down (8 positions before wrapping). */
+    int step = (s_spawn_term_offset % 8) * 30;
     s_spawn_term_offset++;
 
-    int wx = 4 + step;
-    int wy = 4 + step;
-    int ww = sw - wx - 8 - step;
-    int wh = sh - TASKBAR_H - wy - 8 - step;
-    if (ww < 400) ww = 400;
-    if (wh < 300) wh = 300;
+    int wx = 80 + step;
+    int wy = 60 + step;
+    int ww = 680;
+    int wh = 420;
+
+    /* Clamp to screen */
+    int sw = (int)fb_width();
+    int sh = (int)fb_height() - TASKBAR_H;
+    if (wx + ww > sw - 8)  wx = sw - ww - 8;
+    if (wy + wh > sh - 8)  wy = sh - wh - 8;
+    if (wx < 4) wx = 4;
+    if (wy < 4) wy = 4;
 
     wm_window_t *win = wm_create(wx, wy, ww, wh, "Terminal");
     if (!win) return;
@@ -281,6 +297,7 @@ void desktop_add_icon(int x, int y, const char *label,
     ic->label    = ic->label_buf;
     ic->used     = 1;
     s_icon_count++;
+    s_icons_dirty = 1;
 }
 
 void desktop_add_icon_path(const char *label, const char *path)
@@ -305,6 +322,7 @@ void desktop_add_icon_path(const char *label, const char *path)
     ic->label  = ic->label_buf;
     ic->used   = 1;
     s_icon_count++;
+    s_icons_dirty = 1;
 }
 
 /* -------------------------------------------------------------------------
@@ -506,8 +524,10 @@ void desktop_run(void)
         if ((now - last_frame_tick) >= FRAME_TICKS) {
             last_frame_tick = now;
 
-            /*
-             * Only redraw wallpaper when bg_dirty.
+            /* Icon additions from config/shell also trigger a bg redraw */
+            if (s_icons_dirty) { bg_dirty = 1; s_icons_dirty = 0; }
+
+            /* Only redraw wallpaper when bg_dirty.
              * Windows are always repainted on top; their content is the
              * dominant cost so skipping wallpaper saves ~20% back-buffer
              * writes on a static desktop.
