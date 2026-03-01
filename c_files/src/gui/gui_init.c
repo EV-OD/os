@@ -79,9 +79,10 @@ int gui_launch(multiboot_info_t *mb)
 
     /* Desktop icons – double-click to open */
     desktop_add_icon(16,  16, "Terminal", desktop_spawn_terminal);
-    desktop_add_icon(16,  84, "RXT",      desktop_open_rxt);
 
-    /* Restore path icons saved from last session (must come after built-ins) */
+    /* Restore path icons saved from last session (e.g. /etc/desktop.con).
+     * User-configured icons such as "rxt" come from here; no hard-coded
+     * RXT shortcut is added so the config file is the single source of truth. */
     desktop_load_config();
 
     log_info("[gui] gui_launch complete – GUI terminal active");

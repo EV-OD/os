@@ -96,13 +96,13 @@ void desktop_open_rxt(void);
 void desktop_add_icon_path(const char *label, const char *path);
 
 /**
- * Persist the current path-based icons to /etc/desktop.conf.
+ * Persist the current path-based icons to /etc/desktop.con.
  * Built-in icons (Terminal, RXT) are NOT saved – they are registered at boot.
  */
 void desktop_save_config(void);
 
 /**
- * Load /etc/desktop.conf and register the icons found there.
+ * Load /etc/desktop.con and register the icons found there.
  * Called from desktop_init() after the built-in icons have been registered.
  */
 void desktop_load_config(void);

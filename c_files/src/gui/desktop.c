@@ -317,6 +317,21 @@ void desktop_add_icon_path(const char *label, const char *path)
     int i;
     if (s_icon_count >= MAX_ICONS) return;
 
+    /* Skip if an icon with the same path is already registered (prevents
+     * duplicates when desktop.con lists a path that a built-in also covers). */
+    if (path && path[0]) {
+        for (i = 0; i < s_icon_count; i++) {
+            icon_slot_t *ic = &s_icons[i];
+            if (!ic->used) continue;
+            /* Compare path strings */
+            int j;
+            for (j = 0; j < 255 && ic->path[j] && path[j]; j++)
+                if (ic->path[j] != path[j]) break;
+            if (ic->path[j] == '\0' && path[j] == '\0')
+                return; /* duplicate – skip silently */
+        }
+    }
+
     /* Auto-position: two columns of icons on the left side */
     int col  = (s_icon_count / 8) & 1;   /* column 0 or 1 */
     int row  = s_icon_count % 8;
@@ -338,7 +353,7 @@ void desktop_add_icon_path(const char *label, const char *path)
 }
 
 /* -------------------------------------------------------------------------
- * desktop_save_config / desktop_load_config  –  /etc/desktop.conf
+ * desktop_save_config / desktop_load_config  –  /etc/desktop.con
  *
  * Format (one line per icon):  icon <label> <path>
  * ------------------------------------------------------------------------- */
@@ -346,7 +361,7 @@ void desktop_add_icon_path(const char *label, const char *path)
 void desktop_save_config(void)
 {
     int i;
-    int fd = vfs_open("/etc/desktop.conf",
+    int fd = vfs_open("/etc/desktop.con",
                       VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
     if (fd < 0) return;
     for (i = 0; i < s_icon_count; i++) {
@@ -363,9 +378,12 @@ void desktop_save_config(void)
 
 void desktop_load_config(void)
 {
-    int fd = vfs_open("/etc/desktop.conf", VFS_O_RDONLY);
-    if (fd < 0) return;
-
+    int fd = vfs_open("/etc/desktop.con", VFS_O_RDONLY);
+    log_debug("[desktop] loading config from /etc/desktop.con");
+    if (fd < 0) {
+        log_debug("[desktop] no config file found");
+        return;
+    }
     char buf[2048];
     int  total = 0, n;
     while ((n = vfs_read(fd, buf + total,

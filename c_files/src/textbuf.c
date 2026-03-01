@@ -84,7 +84,9 @@ int tbuf_open(const char *path)
     /* Try to load existing file content – use the normalised filename */
     int fd = vfs_open(b->filename, VFS_O_RDONLY);
     if (fd >= 0) {
-        char raw[TBUF_MAX_LINES * TBUF_LINE_LEN];
+        /* Use a static buffer to avoid a 128 KB kernel-stack allocation.
+         * tbuf_open is never called re-entrantly (single kernel thread). */
+        static char raw[TBUF_MAX_LINES * TBUF_LINE_LEN];
         int  total = 0, n;
         while ((n = vfs_read(fd, raw + total,
                              (int)sizeof(raw) - total - 1)) > 0)
