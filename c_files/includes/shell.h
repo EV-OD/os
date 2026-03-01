@@ -60,10 +60,4 @@ os_mode_t os_get_mode(void);
  */
 void os_set_mode(os_mode_t mode);
 
-/**
- * shell_get_cwd – return the shell's current working directory string.
- * Used by kernel subsystems (e.g. tbuf_open) to resolve relative paths.
- */
-const char *shell_get_cwd(void);
-
 #endif /* SHELL_H */

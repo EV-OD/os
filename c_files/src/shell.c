@@ -117,8 +117,6 @@ static const builtin_cmd_t builtins[] = {
  * path.  If the path starts with '/', use it as-is.  Otherwise, join
  * cwd + "/" + path.  Result written into out (must be >= 256 bytes).
  */
-const char *shell_get_cwd(void) { return cwd; }
-
 static void resolve_path(const char *input, char *out, unsigned int out_size)
 {
     if (input[0] == '/') {
