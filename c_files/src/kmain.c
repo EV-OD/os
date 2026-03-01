@@ -167,19 +167,10 @@ void kmain(unsigned int eax, unsigned int ebx)
 #ifdef GUI_MODE
     {
         multiboot_info_t *mb_ptr = (multiboot_info_t *)ebx;
-        if (gui_init(mb_ptr) == 0) {
-            /* Create a full-screen terminal window */
-            int sw = (int)fb_width();
-            int sh = (int)fb_height();
-            wm_window_t *term_win =
-                wm_create(4, 4, sw - 200, sh - TASKBAR_H - 200, "Terminal");
-            if (term_win) {
-                terminal_t *t = gui_term_create(term_win);
-                if (t) {
-                    term_set_active(t);
-                }
-            }
-            desktop_init();
+        if (gui_launch(mb_ptr) == 0) {
+            /* gui_launch() handles: framebuffer init, terminal creation,
+             * desktop_init(), built-in icon registration, and
+             * desktop_load_config() for persisted icons. */
 
             /*
              * Launch two preemptive kernel tasks under the CFS scheduler:
