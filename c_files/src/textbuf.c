@@ -78,8 +78,8 @@ int tbuf_open(const char *path)
     b->cur_line   = 0;
     b->cur_col    = 0;
 
-    /* Try to load existing file content */
-    int fd = vfs_open(path, VFS_O_RDONLY);
+    /* Try to load existing file content – use the normalised filename */
+    int fd = vfs_open(b->filename, VFS_O_RDONLY);
     if (fd >= 0) {
         char raw[TBUF_MAX_LINES * TBUF_LINE_LEN];
         int  total = 0, n;

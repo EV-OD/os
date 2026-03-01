@@ -18,6 +18,7 @@
 
 #include "shell.h"
 #include "stdio.h"
+#include "terminal.h"
 #include "string.h"
 #include "vfs.h"
 #include "rox.h"
@@ -1078,7 +1079,11 @@ static int cmd_echo(int argc, char **argv)
 static int cmd_clear(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    fb_clear();
+    terminal_t *t = term_active();
+    if (t && t->clear)
+        t->clear();
+    else
+        fb_clear();
     cursor_move_home();
     return 0;
 }
