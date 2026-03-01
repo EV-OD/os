@@ -90,6 +90,7 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     win->on_paint   = (void *)0;
     win->on_key     = (void *)0;
     win->on_mouse   = (void *)0;
+    win->on_destroy = (void *)0;
     win->_stack_idx  = 0;
     win->creation_idx = wm_creation_counter++;
     win->pen_color   = 0xFFFFFF;  /* default stroke = white */
@@ -188,6 +189,9 @@ void wm_destroy(wm_window_t *win)
         if (wm_stack[i] == win) { found = i; break; }
     }
     if (found < 0) return;
+
+    /* Notify subsystems (e.g. gui_term) before any memory is freed */
+    if (win->on_destroy) win->on_destroy(win);
 
     /* Free both canvas buffers and the descriptor */
     if (win->canvas)       kfree(win->canvas);

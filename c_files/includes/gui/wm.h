@@ -69,7 +69,12 @@ struct wm_window {
 
     /** Called by the WM to deliver a mouse event (position relative to
      *  the window's client area, button bitmask). */
-    void (*on_mouse )( wm_window_t *win, int rx, int ry, unsigned char btns );
+    void (*on_mouse  )( wm_window_t *win, int rx, int ry, unsigned char btns );
+
+    /** Called by wm_destroy() BEFORE any memory is freed.  Use this to
+     *  release resources (e.g. gui_term cell buffers) and to signal
+     *  any processes blocked on this window (push Ctrl+Q, null win ptr). */
+    void (*on_destroy)( wm_window_t *win );
 
     /* --- Internal (do not touch) --------------------------------------- */
     int _stack_idx;         /**< Position in wm_stack[]; managed by the WM.      */

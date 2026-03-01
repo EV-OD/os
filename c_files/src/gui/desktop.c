@@ -131,6 +131,9 @@ void desktop_spawn_terminal(void)
     s_spawn_pending_term = t;
     process_t *p = process_create("shell", gui_shell_task, 5);
     if (p) {
+        /* Record the shell's pid on the window so wm_destroy's close handler
+         * can kill the shell when the user clicks the close button. */
+        win->owner_pid = (int)p->pid;
         sched_add(p);
     } else {
         s_spawn_pending_term = (void *)0;

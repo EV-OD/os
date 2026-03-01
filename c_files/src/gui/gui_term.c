@@ -184,6 +184,17 @@ static void gt_emit(gui_term_state_t *gt, char c, color_t fg, color_t bg)
     }
 }
 
+static void gt_on_wm_destroy(wm_window_t *win)
+{
+    gui_term_state_t *gt = (gui_term_state_t *)win->userdata;
+    if (!gt) return;
+    /* Push Ctrl+Q (17) so any shell blocked in gt_get_char wakes and exits */
+    gt_key_push(gt, 17);
+    /* Null the back-pointer so gt_put_char and gt_clear won't write the dirty
+     * flag into freed win memory after wm_destroy calls kfree(win). */
+    gt->win = (void *)0;
+}
+
 /* -------------------------------------------------------------------------
  * on_key / on_paint callbacks – dispatched by window userdata
  * ------------------------------------------------------------------------- */
@@ -270,6 +281,7 @@ static void gt_put_char(char c)
     terminal_t *t = term_active();
     if (!t) return;
     gui_term_state_t *gt = GT_FROM_TERM(t);
+    if (!gt->win) return;  /* window was closed */
     gt_emit(gt, c, GT_FG, GT_BG);
     gt->win->dirty = 1;
 }
@@ -279,6 +291,7 @@ static void gt_put_char_color(char c, unsigned char vga_fg)
     terminal_t *t = term_active();
     if (!t) return;
     gui_term_state_t *gt = GT_FROM_TERM(t);
+    if (!gt->win) return;  /* window was closed */
     gt_emit(gt, c, color_from_vga(vga_fg & 0x0F), GT_BG);
     gt->win->dirty = 1;
 }
@@ -288,6 +301,7 @@ static void gt_put_string(const char *s)
     terminal_t *t = term_active();
     if (!t || !s) return;
     gui_term_state_t *gt = GT_FROM_TERM(t);
+    if (!gt->win) return;  /* window was closed */
     while (*s) gt_emit(gt, *s++, GT_FG, GT_BG);
     gt->win->dirty = 1;
 }
@@ -297,6 +311,7 @@ static void gt_put_string_color(const char *s, unsigned char vga_fg)
     terminal_t *t = term_active();
     if (!t || !s) return;
     gui_term_state_t *gt = GT_FROM_TERM(t);
+    if (!gt->win) return;  /* window was closed */
     color_t fg = color_from_vga(vga_fg & 0x0F);
     while (*s) gt_emit(gt, *s++, fg, GT_BG);
     gt->win->dirty = 1;
@@ -312,6 +327,7 @@ static int gt_get_char(void)
     if (!t) return -1;
     gui_term_state_t *gt = GT_FROM_TERM(t);
     while (gt->key_head == gt->key_tail) {
+        if (!gt->win) return 17;  /* window closed – return Ctrl+Q to exit shell */
         /* yield – PIT-driven scheduler preempts to compositor */
     }
     char c = gt->key_buf[gt->key_head];
@@ -352,6 +368,7 @@ static void gt_clear(void)
     terminal_t *t = term_active();
     if (!t) return;
     gui_term_state_t *gt = GT_FROM_TERM(t);
+    if (!gt->win) return;  /* window was closed */
     for (row = 0; row < gt->rows; row++)
         for (col = 0; col < gt->cols; col++) {
             *cell_char(gt, col, row) = ' ';
@@ -433,8 +450,9 @@ terminal_t *gui_term_create(wm_window_t *win)
     gt->term.tprintf         = gt_tprintf;
 
     /* Set WM callbacks */
-    win->on_paint = gt_paint;
-    win->on_key   = gt_on_key;
+    win->on_paint   = gt_paint;
+    win->on_key     = gt_on_key;
+    win->on_destroy = gt_on_wm_destroy;
 
     /* Register in window userdata so on_key / on_paint can find this instance */
     win->userdata = gt;
