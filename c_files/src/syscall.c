@@ -278,6 +278,9 @@ static int sys_gui_open(struct cpu_state *cpu, struct stack_state *stack)
     wm_window_t *win = wm_create(x, y, w, h, title ?: "Window");
     if (win) {
         process_t *cur = sched_current();
+        if (win) {
+            win->no_drag = 0;
+        }
         win->owner_pid = cur ? (int)cur->pid : 0;
         wm_alloc_canvas(win);   /* allocate offscreen pixel buffer */
         wm_paint_all();

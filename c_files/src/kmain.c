@@ -163,7 +163,7 @@ void kmain(unsigned int eax, unsigned int ebx)
             int sw = (int)fb_width();
             int sh = (int)fb_height();
             wm_window_t *term_win =
-                wm_create(4, 4, sw - 8, sh - TASKBAR_H - 8, "Terminal");
+                wm_create(4, 4, sw - 200, sh - TASKBAR_H - 200, "Terminal");
             if (term_win) {
                 terminal_t *t = gui_term_create(term_win);
                 if (t) {
