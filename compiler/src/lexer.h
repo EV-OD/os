@@ -132,6 +132,8 @@ typedef enum {
     TOK_TBUF_CURSOR,    /* tbuf_cursor                                      */
     TOK_TBUF_NUMSTR,    /* tbuf_numstr                                      */
     TOK_GETARG,         /* getarg                                           */
+    TOK_TBUF_SAVEAS,    /* io_saveas  – save-as dialog                       */
+    TOK_SPAWN_TERM,     /* spawn_term – open new terminal window             */
 
     /* Types */
     TOK_TYPE_I8,      /* i8                                               */

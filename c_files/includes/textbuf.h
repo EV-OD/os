@@ -31,6 +31,20 @@ int tbuf_close(int h);
 /* tbuf_save – write the buffer content back to the original file. */
 int tbuf_save(int h);
 
+/**
+ * tbuf_saveas – interactive "Save As" dialog drawn onto a window canvas.
+ *
+ * Draws a modal overlay on @win, collects a filename from the user
+ * (via the window's key queue), then saves to:
+ *   - the typed path if it starts with '/'
+ *   - /home/<typed_name> otherwise
+ *
+ * Enter to confirm, Escape to cancel.
+ * @return  0 on success, -1 if cancelled or error.
+ */
+struct wm_window_t; /* forward */
+int tbuf_saveas(int h, void *win);
+
 /* tbuf_getline – return a pointer to the NUL-terminated text of line n.
  * Returns pointer to a static empty string if h or n is out of range. */
 const char *tbuf_getline(int h, int n);

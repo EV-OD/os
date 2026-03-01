@@ -118,6 +118,8 @@ static const KwEntry KEYWORDS[] = {
     { "tbuf_cursor",    TOK_TBUF_CURSOR    },
     { "tbuf_numstr",    TOK_TBUF_NUMSTR    },
     { "getarg",         TOK_GETARG         },
+    { "io_saveas",      TOK_TBUF_SAVEAS    },
+    { "spawn_term",     TOK_SPAWN_TERM     },
     /* primitive types */
     { "i8",         TOK_TYPE_I8   },
     { "i16",        TOK_TYPE_I16  },
@@ -428,8 +430,10 @@ const char *token_type_name(TokenType t)
         case TOK_TBUF_INPUT:      return "tbuf_input";
         case TOK_TBUF_LINECOUNT:  return "tbuf_linecount";
         case TOK_TBUF_CURSOR:     return "tbuf_cursor";
-        case TOK_TBUF_NUMSTR:     return "tbuf_numstr";
+        case TOK_TBUF_NUMSTR:      return "tbuf_numstr";
         case TOK_GETARG:          return "getarg";
+        case TOK_TBUF_SAVEAS:     return "io_saveas";
+        case TOK_SPAWN_TERM:      return "spawn_term";
         case TOK_TYPE_I8:     return "i8";
         case TOK_TYPE_I16:    return "i16";
         case TOK_TYPE_I32:    return "i32";

@@ -5,6 +5,9 @@
 #include "vfs.h"
 #include "string.h"
 #include "log.h"
+#include "gui/wm.h"
+#include "gui/canvas.h"
+#include "gui/fb.h"
 
 /* Virtual key codes (must match keyboard.c) */
 #define KEY_UP    200
@@ -301,4 +304,114 @@ const char *tbuf_numstr(int h, int n)
     }
     if (neg && pos >= 0) numstr_buf[pos--] = '-';
     return &numstr_buf[pos + 1];
+}
+
+/* -------------------------------------------------------------------------
+ * tbuf_saveas  – in-window "Save As" dialog
+ * ------------------------------------------------------------------------- */
+int tbuf_saveas(int h, void *win_ptr)
+{
+    if (!valid(h)) return -1;
+    wm_window_t *win = (wm_window_t *)win_ptr;
+    if (!win || !win->canvas) return -1;
+
+    textbuf_t *b  = &bufs[h];
+    int cw        = win->w;
+    int ch        = win->h - TITLE_BAR_H;
+
+    /* Dialog geometry */
+    int dw = 360, dh = 80;
+    int dx = (cw - dw) / 2;
+    int dy = (ch - dh) / 2;
+
+    /* Input buffer */
+    char name[64];
+    int  nlen = 0;
+    name[0]   = '\0';
+
+    for (;;) {
+        /* ----- Draw dialog ----- */
+        /* Dim overlay */
+        int px, py;
+        for (py = 0; py < ch; py++)
+            for (px = 0; px < cw; px++) {
+                unsigned int *p = &win->canvas[py * cw + px];
+                unsigned int c = *p;
+                /* Fast 50% dim: shift each channel right by 1 */
+                *p = ((c >> 1) & 0x7F7F7F);
+            }
+        /* Dialog background */
+        cnv_fill_rect(win->canvas, cw, ch, dx,       dy,       dw, dh,  0x1A2B3C);
+        cnv_fill_rect(win->canvas, cw, ch, dx,       dy,       dw, 1,   0x5588FF);
+        cnv_fill_rect(win->canvas, cw, ch, dx,       dy+dh-1,  dw, 1,   0x5588FF);
+        cnv_fill_rect(win->canvas, cw, ch, dx,       dy,       1, dh,   0x5588FF);
+        cnv_fill_rect(win->canvas, cw, ch, dx+dw-1,  dy,       1, dh,   0x5588FF);
+        /* Prompt text */
+        cnv_draw_str(win->canvas, cw, ch,
+                     dx + 8, dy + 8,
+                     "Save As (Enter=confirm Esc=cancel):",
+                     0xCCCCCC, 0);
+        /* Input field background */
+        cnv_fill_rect(win->canvas, cw, ch, dx+8, dy+26, dw-16, 18, 0x0D1A26);
+        /* Current typed text */
+        cnv_draw_str(win->canvas, cw, ch,
+                     dx + 10, dy + 28, name, 0xFFFFFF, 0);
+        /* Cursor bar */
+        int cur_x = dx + 10 + nlen * 8;
+        cnv_fill_rect(win->canvas, cw, ch, cur_x, dy+28, 2, 12, 0xFFFFFF);
+        /* Hint */
+        cnv_draw_str(win->canvas, cw, ch,
+                     dx + 8, dy + 58,
+                     "(no path prefix = saved to /home/)",
+                     0x888888, 0);
+
+        /* Present to screen */
+        wm_present_canvas(win);
+        wm_paint(win);
+        fb_flush();
+
+        /* Wait for key */
+        __asm__ volatile("sti");
+        int c;
+        for (;;) {
+            c = wm_window_key_pop(win);
+            if (c >= 0) break;
+            __asm__ volatile("hlt");
+        }
+
+        if (c == 27) return -1;  /* Escape – cancel */
+        if (c == 13) break;      /* Enter  – confirm */
+        if ((c == 8 || c == 127) && nlen > 0) {
+            name[--nlen] = '\0';
+        } else if (c >= 32 && c < 127 && nlen < 63) {
+            name[nlen++] = (char)c;
+            name[nlen]   = '\0';
+        }
+    }
+
+    if (nlen == 0) return -1;
+
+    /* Build final path */
+    char path[256];
+    int  pi = 0;
+    if (name[0] == '/' || name[0] == '.') {
+        /* User gave an absolute or relative path – use as-is */
+        while (name[pi] && pi < 255) { path[pi] = name[pi]; pi++; }
+    } else {
+        /* Prefix /home/ */
+        const char *prefix = "/home/";
+        int pl = 0;
+        while (prefix[pl]) path[pi++] = prefix[pl++];
+        int ni = 0;
+        while (name[ni] && pi < 255) { path[pi++] = name[ni++]; }
+    }
+    path[pi] = '\0';
+
+    /* Persist: update filename and save */
+    int fi = 0;
+    while (path[fi] && fi < 255) { b->filename[fi] = path[fi]; fi++; }
+    b->filename[fi] = '\0';
+
+    log_info("[tbuf] saveas '%s'", b->filename);
+    return tbuf_save(h);
 }

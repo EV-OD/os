@@ -239,10 +239,17 @@ static void desktop_draw_icons(void)
         icon_slot_t *ic = &s_icons[i];
         if (!ic->used) continue;
 
-        /* Icon placeholder square */
+        /* Icon placeholder – show first letter of label as big glyph */
         gfx_fill_round_rect(ic->x, ic->y, 48, 48, 6,
                             COLOR_RGB(0x20, 0x40, 0x80));
         gfx_draw_rect(ic->x, ic->y, 48, 48, COLOR_RGB(0x40, 0x70, 0xCC));
+        if (ic->label && ic->label[0]) {
+            char ch[2]; ch[0] = ic->label[0]; ch[1] = '\0';
+            /* Centre the character in the 48x48 square (font is 8px wide, 12px tall) */
+            int cx2 = ic->x + (48 - 8) / 2;
+            int cy2 = ic->y + (48 - 12) / 2;
+            font_draw_str(cx2, cy2, ch, COLOR_WHITE, COLOR_TRANSPARENT);
+        }
 
         /* Label */
         if (ic->label) {
@@ -444,9 +451,7 @@ void desktop_init(void)
     fb_flush();
     log_info("[desktop] desktop initialised (%ux%u)",
              fb_width(), fb_height());
-
-    /* Restore icons saved by previous session */
-    desktop_load_config();
+    /* desktop_load_config() is called by gui_launch() after built-in icons */
 }
 
 /* -------------------------------------------------------------------------

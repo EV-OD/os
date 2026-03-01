@@ -97,7 +97,8 @@ static int tok_is_gui(Parser *p)
             t == TOK_TBUF_SAVE        || t == TOK_TBUF_GETLINE     ||
             t == TOK_TBUF_INPUT       || t == TOK_TBUF_LINECOUNT   ||
             t == TOK_TBUF_CURSOR      || t == TOK_TBUF_NUMSTR      ||
-            t == TOK_GETARG);
+            t == TOK_GETARG           ||
+            t == TOK_TBUF_SAVEAS      || t == TOK_SPAWN_TERM);
 }
 
 /* Parse and return a type name string into buf (MAX_IDENT_LEN). */
@@ -231,6 +232,8 @@ static AstNode *parse_primary(Parser *p)
             case TOK_TBUF_CURSOR:       n->gui_op = 27; break;
             case TOK_TBUF_NUMSTR:       n->gui_op = 28; break;
             case TOK_GETARG:            n->gui_op = 29; break;
+            case TOK_SPAWN_TERM:        n->gui_op = 30; break;
+            case TOK_TBUF_SAVEAS:       n->gui_op = 31; break;
             default:                   n->gui_op = 0;  break;
         }
 

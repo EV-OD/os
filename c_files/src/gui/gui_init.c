@@ -79,6 +79,9 @@ int gui_launch(multiboot_info_t *mb)
     desktop_add_icon(16,  16, "Terminal", desktop_spawn_terminal);
     desktop_add_icon(16,  84, "RXT",      desktop_open_rxt);
 
+    /* Restore path icons saved from last session (must come after built-ins) */
+    desktop_load_config();
+
     log_info("[gui] gui_launch complete – GUI terminal active");
     return 0;
 }

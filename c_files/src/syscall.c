@@ -55,6 +55,8 @@ static int sys_tbuf_linecount(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_tbuf_cursor(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_tbuf_numstr(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_getarg(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_spawn_term(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_tbuf_saveas(struct cpu_state *cpu, struct stack_state *stack);
 
 /* -------------------------------------------------------------------------
  * Syscall table
@@ -93,6 +95,8 @@ static syscall_fn_t syscall_table[] = {
     [SYS_TBUF_CURSOR]      = sys_tbuf_cursor,
     [SYS_TBUF_NUMSTR]      = sys_tbuf_numstr,
     [SYS_GETARG]           = sys_getarg,
+    [SYS_SPAWN_TERM]       = sys_spawn_term,
+    [SYS_TBUF_SAVEAS]      = sys_tbuf_saveas,
 };
 
 /* -------------------------------------------------------------------------
@@ -646,4 +650,23 @@ static int sys_getarg(struct cpu_state *cpu, struct stack_state *stack)
     process_t *cur = sched_current();
     if (!cur || idx < 0 || idx >= cur->argc) return 0;
     return (int)cur->args[idx];
+}
+
+/* SYS_SPAWN_TERM (30) – spawn a new GUI terminal window + shell task. */
+#include "gui/desktop.h"
+static int sys_spawn_term(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)cpu; (void)stack;
+    desktop_spawn_terminal();
+    return 0;
+}
+
+/* SYS_TBUF_SAVEAS (31) – EBX=tbuf_handle, ECX=win_ptr.
+ * Interactive save-as dialog rendered on the window canvas. */
+static int sys_tbuf_saveas(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    int h      = (int)cpu->ebx;
+    void *win  = (void *)cpu->ecx;
+    return tbuf_saveas(h, win);
 }

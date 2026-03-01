@@ -699,8 +699,8 @@ static void shell_init_stdlib(void)
  * ========================================================================= */
 static const char RXT_ROS[] =
     "// rxt -- RandomOS Text Editor\n"
-    "// Usage:  rxt <filename>\n"
-    "//  Ctrl+S = Save    Ctrl+Q = Quit\n"
+    "// Usage:  rxt <filename>   (or launch from desktop with no arg)\n"
+    "//  Ctrl+S = Save / Save As    Ctrl+Q = Quit\n"
     "//\n"
     "// Install with:  setup\n"
     "// Then run:      rxt myfile.txt\n"
@@ -710,6 +710,10 @@ static const char RXT_ROS[] =
     "\n"
     "fn main() {\n"
     "    let fname: i32 = getarg(1)\n"
+    "    let mut has_name: i32 = 0\n"
+    "    if fname != 0 {\n"
+    "        has_name = 1\n"
+    "    }\n"
     "    let tb: i32 = io_open(fname)\n"
     "    let win: i32 = gui_window(50, 30, 640, 420, \"rxt editor\")\n"
     "    let C_BG: i32 = 0x1E1E1E\n"
@@ -759,7 +763,12 @@ static const char RXT_ROS[] =
     "        } else if k == 17 {\n"
     "            running = 0\n"
     "        } else if k == 19 {\n"
-    "            io_save(tb)\n"
+    "            if has_name == 0 {\n"
+    "                io_saveas(tb, win)\n"
+    "                has_name = 1\n"
+    "            } else {\n"
+    "                io_save(tb)\n"
+    "            }\n"
     "        } else {\n"
     "            io_key(tb, k)\n"
     "            mut more: i32 = gui_poll(win)\n"
@@ -767,7 +776,12 @@ static const char RXT_ROS[] =
     "                if more == 17 {\n"
     "                    running = 0\n"
     "                } else if more == 19 {\n"
-    "                    io_save(tb)\n"
+    "                    if has_name == 0 {\n"
+    "                        io_saveas(tb, win)\n"
+    "                        has_name = 1\n"
+    "                    } else {\n"
+    "                        io_save(tb)\n"
+    "                    }\n"
     "                } else {\n"
     "                    io_key(tb, more)\n"
     "                }\n"
@@ -789,6 +803,16 @@ static const char RXT_ROS[] =
 /* =========================================================================
  * OS directory structure creation
  * ========================================================================= */
+
+static const char TERM_ROS[] =
+    "// term -- spawn a new GUI terminal window\n"
+    "// Install with: setup\n"
+    "// Run from desktop or shell: term\n"
+    "import gui\n"
+    "fn main() {\n"
+    "    spawn_term()\n"
+    "}\n";
+
 void shell_init(void)
 {
     log_info("[shell] creating OS directory structure");
@@ -1991,6 +2015,26 @@ static int cmd_setup(int argc, char **argv)
     vfs_unlink("/tmp/rxt.ros");
     puts_color("[setup] rxt installed at /bin/rxt.rox\n", COLOR_LIGHT_GREEN);
     puts_color("  Usage: rxt <filename>\n", COLOR_WHITE);
+
+    /* ---- Install term.rox ---- */
+    puts_color("[setup] Writing term source...\n", COLOR_LIGHT_CYAN);
+    fd = vfs_open("/tmp/term.ros", VFS_O_RDWR | VFS_O_CREAT | VFS_O_TRUNC);
+    if (fd < 0) {
+        puts_color("[setup] warning: cannot write /tmp/term.ros\n", COLOR_LIGHT_RED);
+        return 0; /* rxt succeeded; non-fatal */
+    }
+    vfs_write(fd, TERM_ROS, strlen(TERM_ROS));
+    vfs_close(fd);
+
+    puts_color("[setup] Compiling term.ros -> /bin/term.rox ...\n", COLOR_LIGHT_CYAN);
+    ret = rosc_compile("/tmp/term.ros", "/bin/term.rox", 1);
+    if (ret < 0) {
+        puts_color("[setup] warning: term compilation failed\n", COLOR_LIGHT_RED);
+        return 0;
+    }
+    vfs_unlink("/tmp/term.ros");
+    puts_color("[setup] term installed at /bin/term.rox\n", COLOR_LIGHT_GREEN);
+    puts_color("  Usage: term   (opens a new terminal window)\n", COLOR_WHITE);
     return 0;
 }
 

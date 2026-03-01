@@ -55,9 +55,11 @@
 #define SYS_TBUF_CURSOR    27  /* int  tbuf_cursor(int h)  (line | col<<16)      */
 #define SYS_TBUF_NUMSTR    28  /* const char *tbuf_numstr(int h, int n)          */
 #define SYS_GETARG         29  /* const char *getarg(int idx)                    */
+#define SYS_SPAWN_TERM     30  /* void  spawn_term(void)   – open a new terminal  */
+#define SYS_TBUF_SAVEAS    31  /* int   tbuf_saveas(int h, void *win)             */
 
 #undef SYSCALL_MAX
-#define SYSCALL_MAX  29
+#define SYSCALL_MAX  31
 
 
 /* -------------------------------------------------------------------------
