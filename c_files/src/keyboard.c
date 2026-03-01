@@ -135,14 +135,24 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
             case SC_RIGHT_KEY: buffer_push(KEY_RIGHT); break;
             case SC_HOME_KEY:  buffer_push(KEY_HOME);  break;
             case SC_END_KEY:   buffer_push(KEY_END);   break;
+            /* Right Ctrl sends E0 + 0x1D (press) / E0 + 0x9D (release) */
+            case SC_LCTRL_PRESS:
+                log_info("[kbd] Right Ctrl pressed");
+                ctrl_held = 1;
+                return;
+            case SC_LCTRL_RELEASE:
+                log_info("[kbd] Right Ctrl released");
+                ctrl_held = 0;
+                return;
             default: break;
         }
         sched_wake_waiters(WAIT_KEY);
         return;
     }
 
-    /* ---- Track modifier key press / release ---- */
+    /* ---- Track modifier key press / release (with serial debug) ---- */
     if (scancode == SC_LSHIFT_PRESS || scancode == SC_RSHIFT_PRESS) {
+        log_info("[kbd] Shift pressed (sc=0x%x)", (int)scancode);
         shift_held = 1;
         return;
     }
@@ -151,10 +161,12 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         return;
     }
     if (scancode == SC_LCTRL_PRESS) {
+        log_info("[kbd] Left Ctrl pressed");
         ctrl_held = 1;
         return;
     }
     if (scancode == SC_LCTRL_RELEASE) {
+        log_info("[kbd] Left Ctrl released");
         ctrl_held = 0;
         return;
     }
@@ -177,9 +189,17 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         }
         return;
     }
+    /* Ctrl+key combos – log to serial for debugging */
+    if (ctrl_held) {
+        char _ascii = keyboard_scancode_to_ascii(scancode, 0);
+        if (_ascii >= 'a' && _ascii <= 'z')
+            log_info("[kbd] Ctrl+%c (sc=0x%x)", (int)_ascii, (int)scancode);
+        else
+            log_info("[kbd] Ctrl+sc=0x%x", (int)scancode);
+    }
     /* Ctrl+S → 19 (DC3), Ctrl+Q → 17 (DC1): pass to app for editor shortcuts */
-    if (ctrl_held && scancode == SC_S_KEY) { buffer_push(19); sched_wake_waiters(WAIT_KEY); return; }
-    if (ctrl_held && scancode == SC_Q_KEY) { buffer_push(17); sched_wake_waiters(WAIT_KEY); return; }
+    if (ctrl_held && scancode == SC_S_KEY) { log_info("[kbd] Ctrl+S → pushing 19 (save)"); buffer_push(19); sched_wake_waiters(WAIT_KEY); return; }
+    if (ctrl_held && scancode == SC_Q_KEY) { log_info("[kbd] Ctrl+Q → pushing 17 (quit)"); buffer_push(17); sched_wake_waiters(WAIT_KEY); return; }
 
     /*
      * Determine the effective shift state for this key:

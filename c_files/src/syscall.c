@@ -226,29 +226,23 @@ static int sys_read(struct cpu_state *cpu, struct stack_state *stack)
         return 1;
     }
 
-    /* Slow path: put process to sleep until keyboard ISR wakes it. */
+    /* Slow path: spin with hlt until keyboard ISR delivers a key.
+     * We deliberately do NOT set PROC_SLEEPING here.  Setting it causes
+     * sched_tick to move the process into sleeping_queue; the keyboard ISR
+     * then wakes it back to RUNNABLE, but the process won't actually run
+     * until the *next* timer tick — adding up to 10 ms of invisible lag.
+     * By staying RUNNABLE, hlt still saves CPU power (wakes on any IRQ)
+     * and the key is consumed the moment the keyboard IRQ returns. */
     __asm__ volatile("sti");
     for (;;) {
-        if (rdcur) {
-            if (rdcur->killed) {
-                rdcur->exit_status = -1;
-                rdcur->state       = PROC_DEAD;
-                for (;;) __asm__ volatile("hlt");
-            }
-            /* Re-arm sleep state before each hlt so sched_tick
-             * moves us off the run queue until the keyboard IRQ
-             * calls sched_wake_waiters(WAIT_KEY). */
-            rdcur->state       = PROC_SLEEPING;
-            rdcur->wait_reason = WAIT_KEY;
+        if (rdcur && rdcur->killed) {
+            rdcur->exit_status = -1;
+            rdcur->state       = PROC_DEAD;
+            for (;;) __asm__ volatile("hlt");
         }
-        __asm__ volatile("hlt");  /* sleep until any IRQ wakes the CPU */
-        /* After hlt: either keyboard fired (data in buffer) or timer
-         * rescheduled us.  Check for data. */
+        __asm__ volatile("hlt");  /* wake on any IRQ, then re-check */
         _c = keyboard_read_char();
         if (_c != -1) break;
-    }
-    if (rdcur) {
-        rdcur->wait_reason = WAIT_NONE;
     }
     buf[0] = (char)_c;
     return 1;
@@ -548,32 +542,20 @@ static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
     int c = keyboard_read_char();
     if (c != -1) return c;
 
-    /* Slow path: block until a key arrives or the window is closed. */
+    /* Slow path: spin with hlt until a key arrives or the window closes.
+     * Stay RUNNABLE (do not set PROC_SLEEPING) so the keyboard IRQ's
+     * hlt wakeup is acted on immediately without waiting for the next
+     * 10 ms timer tick.  hlt still saves CPU between IRQs. */
     __asm__ volatile("sti");
     for (;;) {
-        if (wcur) {
-            if (wcur->killed) {
-                /* Window was closed (or Ctrl+C).  Returning -1 while
-                 * still runnable causes an infinite spin (the ROX program
-                 * re-enters gui_wait every instruction, sti never fires
-                 * long enough for the timer → system-wide freeze).
-                 * Terminate the process here instead; the shell's
-                 * process_wait() will see PROC_DEAD and unblock. */
-                wcur->wait_reason = WAIT_NONE;
-                wcur->exit_status = -1;
-                wcur->state       = PROC_DEAD;
-                for (;;) __asm__ volatile("hlt");
-            }
-            /* Re-arm sleep state before each hlt. */
-            wcur->state       = PROC_SLEEPING;
-            wcur->wait_reason = WAIT_KEY;
+        if (wcur && wcur->killed) {
+            wcur->exit_status = -1;
+            wcur->state       = PROC_DEAD;
+            for (;;) __asm__ volatile("hlt");
         }
         __asm__ volatile("hlt");
         c = keyboard_read_char();
         if (c != -1) break;
-    }
-    if (wcur) {
-        wcur->wait_reason = WAIT_NONE;
     }
     return c;
 }
