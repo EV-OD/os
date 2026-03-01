@@ -207,6 +207,33 @@ static int resolve_and_execute(int argc, char **argv)
     const char *cmd = argv[0];
     vfs_stat_t st;
 
+    /*
+     * Resolve any relative path arguments (argv[1..]) to absolute paths
+     * before passing them to the child process.  This ensures that
+     * "rxt ./home.txt" while in /home passes "/home/home.txt" to rxt,
+     * not the raw "./home.txt" string.
+     *
+     * We fix up args in-place using a set of static scratch buffers
+     * (safe: shell is single-threaded and rox_load_and_run copies argv).
+     */
+    {
+        static char resolved_args[SHELL_MAX_ARGS][256];
+        int ai;
+        for (ai = 1; ai < argc; ai++) {
+            const char *a = argv[ai];
+            /* Resolve args that are explicitly relative paths: ./ or ../ */
+            if (a[0] == '.' && a[1] == '/') {
+                /* "./foo.txt" → resolve "foo.txt" against cwd */
+                resolve_path(a + 2, resolved_args[ai], sizeof(resolved_args[ai]));
+                argv[ai] = resolved_args[ai];
+            } else if (a[0] == '.' && a[1] == '.' && a[2] == '/') {
+                /* "../foo.txt" → resolve against cwd as-is */
+                resolve_path(a, resolved_args[ai], sizeof(resolved_args[ai]));
+                argv[ai] = resolved_args[ai];
+            }
+        }
+    }
+
     /* --- Step 1: Explicit path (starts with / or ./) ------------------- */
     if (cmd[0] == '/') {
         /* Absolute path – run directly */

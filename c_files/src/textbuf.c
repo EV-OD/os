@@ -67,7 +67,9 @@ int tbuf_open(const char *path)
 
     textbuf_t *b = &bufs[h];
     memset(b, 0, sizeof(*b));
-    /* Normalise to absolute path: "foo.txt" → "/foo.txt" */
+    /* Normalise to absolute path: "foo.txt" → "/foo.txt".
+     * Callers (shell) are expected to resolve relative paths like "./foo.txt"
+     * to absolute paths before invoking tbuf_open. */
     if (path && path[0] != '/') {
         b->filename[0] = '/';
         strncpy(b->filename + 1, path, 254);
