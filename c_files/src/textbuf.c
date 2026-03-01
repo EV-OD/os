@@ -64,8 +64,15 @@ int tbuf_open(const char *path)
 
     textbuf_t *b = &bufs[h];
     memset(b, 0, sizeof(*b));
-    strncpy(b->filename, path, 255);
-    b->filename[255] = '\0';
+    /* Normalise to absolute path: "foo.txt" → "/foo.txt" */
+    if (path && path[0] != '/') {
+        b->filename[0] = '/';
+        strncpy(b->filename + 1, path, 254);
+        b->filename[255] = '\0';
+    } else {
+        strncpy(b->filename, (path && path[0]) ? path : "/untitled", 255);
+        b->filename[255] = '\0';
+    }
     b->in_use     = 1;
     b->line_count = 1;   /* always at least one (empty) line */
     b->cur_line   = 0;
