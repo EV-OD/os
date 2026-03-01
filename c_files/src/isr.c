@@ -84,9 +84,30 @@ static void page_fault_handler(struct cpu_state *cpu, struct stack_state *stack,
         }
     }
 
-    /* Kernel-mode page fault – unrecoverable.  Halt the CPU. */
-    serial_write("[#PF] KERNEL PAGE FAULT – halting.\r\n");
-    for (;;) { __asm__ volatile("cli; hlt"); }
+    /* Kernel-mode page fault – try to recover by killing the current process.
+     * This typically means a bug in a syscall handler (e.g. bad user pointer).
+     * Kill the guilty process and let the PIT scheduler pick the next one. */
+    {
+        process_t *cur = sched_current();
+        if (cur) {
+            char kbuf[128];
+            sprintf(kbuf, "[#PF] kernel fault while running '%s' pid=%d – killing process\r\n",
+                    cur->name ? cur->name : "?", (int)cur->pid);
+            serial_write(kbuf);
+            log_error("[#PF] kernel fault in process '%s' pid=%d (CR2=0x%x EIP=0x%x)",
+                      cur->name ? cur->name : "?", (int)cur->pid, cr2, stack->eip);
+            cur->exit_status = -14;
+            cur->state       = PROC_DEAD;
+            /* Enable interrupts so the PIT can fire and the scheduler can
+             * switch to the next runnable process. */
+            for (;;) { __asm__ volatile("sti; hlt"); }
+        }
+    }
+    /* True kernel panic – no current user process to blame.
+     * Keep scheduling alive with sti so the system can continue if possible. */
+    serial_write("[#PF] KERNEL PANIC – no current process (CR2 and EIP above).\r\n");
+    log_error("[#PF] KERNEL PANIC CR2=0x%x EIP=0x%x", cr2, stack->eip);
+    for (;;) { __asm__ volatile("sti; hlt"); }
 }
 
 /* -------------------------------------------------------------------------
@@ -136,9 +157,25 @@ static void generic_exception_handler(struct cpu_state *cpu, struct stack_state 
         }
     }
 
-    /* Kernel-mode fault – unrecoverable. */
-    serial_write("[FAULT] KERNEL EXCEPTION – halting.\r\n");
-    for (;;) { __asm__ volatile("cli; hlt"); }
+    /* Kernel-mode exception – try to recover by killing the current process. */
+    {
+        process_t *cur = sched_current();
+        if (cur) {
+            char kbuf[128];
+            sprintf(kbuf, "[FAULT] kernel %s in process '%s' pid=%d – killing\r\n",
+                    name, cur->name ? cur->name : "?", (int)cur->pid);
+            serial_write(kbuf);
+            log_error("[FAULT] kernel %s vec=%d EIP=0x%x in '%s' pid=%d",
+                      name, (int)interrupt, stack->eip,
+                      cur->name ? cur->name : "?", (int)cur->pid);
+            cur->exit_status = -(int)interrupt;
+            cur->state       = PROC_DEAD;
+            for (;;) { __asm__ volatile("sti; hlt"); }
+        }
+    }
+    serial_write("[FAULT] KERNEL PANIC – no current process.\r\n");
+    log_error("[FAULT] KERNEL PANIC %s vec=%d EIP=0x%x", name, (int)interrupt, stack->eip);
+    for (;;) { __asm__ volatile("sti; hlt"); }
 }
 
 /* ISR/IRQ stubs defined in asm/isr.s */

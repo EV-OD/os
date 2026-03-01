@@ -68,10 +68,10 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
         return (void *)0;
     }
 
-    /* No separate canvas buffer – gui_term renders directly to the
-     * framebuffer back-buffer.  This saves the ~3 MB allocation that
-     * a full-screen canvas would require. */
-    win->canvas = (void *)0;
+    /* No canvas yet – allocated lazily by wm_alloc_canvas() */
+    win->canvas        = (void *)0;
+    win->front_canvas  = (void *)0;
+    win->canvas_size   = 0;
 
     win->x = x; win->y = y;
     win->w = w; win->h = h;
@@ -121,19 +121,48 @@ int wm_alloc_canvas(wm_window_t *win)
     int ch = win->h - TITLE_BAR_H;
     if (cw <= 0 || ch <= 0) return 0;
 
-    win->canvas = (unsigned int *)kmalloc(
-        (unsigned int)(cw * ch) * sizeof(unsigned int));
+    unsigned int sz = (unsigned int)(cw * ch) * sizeof(unsigned int);
+
+    win->canvas = (unsigned int *)kmalloc(sz);
     if (!win->canvas) {
-        log_error("[wm] wm_alloc_canvas: kmalloc failed (%dx%d)", cw, ch);
+        log_error("[wm] wm_alloc_canvas: draw kmalloc failed (%dx%d)", cw, ch);
         return 0;
     }
 
-    /* Fill with the window's background colour. */
-    cnv_clear(win->canvas, cw, ch, win->bg_color);
+    win->front_canvas = (unsigned int *)kmalloc(sz);
+    if (!win->front_canvas) {
+        kfree(win->canvas);
+        win->canvas = (void *)0;
+        log_error("[wm] wm_alloc_canvas: front kmalloc failed (%dx%d)", cw, ch);
+        return 0;
+    }
+
+    win->canvas_size = (unsigned int)(cw * ch);
+
+    /* Fill both buffers with the window's background colour. */
+    cnv_clear(win->canvas,       cw, ch, win->bg_color);
+    cnv_clear(win->front_canvas, cw, ch, win->bg_color);
 
     log_info("[wm] canvas allocated for '%s' (%dx%d, %d bytes)",
              win->title, cw, ch, cw * ch * 4);
     return 1;
+}
+
+/* -------------------------------------------------------------------------
+ * wm_present_canvas – copy draw canvas → front canvas (called by gui_flush).
+ *
+ * This is the double-buffer swap point.  The compositor always blits
+ * front_canvas; the user process always draws into canvas.  Copying here
+ * ensures the compositor never sees a partial frame (half-cleared canvas).
+ * ------------------------------------------------------------------------- */
+void wm_present_canvas(wm_window_t *win)
+{
+    if (!win || !win->canvas || !win->front_canvas) return;
+    unsigned int  n   = win->canvas_size;
+    unsigned int *dst = win->front_canvas;
+    unsigned int *src = win->canvas;
+    /* Use a simple word loop – compiler will auto-vectorise or use rep movsd */
+    while (n--) *dst++ = *src++;
 }
 
 /* -------------------------------------------------------------------------
@@ -152,8 +181,9 @@ void wm_destroy(wm_window_t *win)
     }
     if (found < 0) return;
 
-    /* Free canvas (only if a separate buffer was allocated) and descriptor */
-    if (win->canvas) kfree(win->canvas);
+    /* Free both canvas buffers and the descriptor */
+    if (win->canvas)       kfree(win->canvas);
+    if (win->front_canvas) kfree(win->front_canvas);
     kfree(win);
 
     /* Compact the stack */
@@ -241,8 +271,14 @@ void wm_paint(wm_window_t *win)
     }
 
     /* ---- Canvas blit (user windows) ---- */
-    if (win->canvas && client_h > 0) {
-        /* Blit the offscreen canvas into the framebuffer back-buffer. */
+    /* Always blit from front_canvas (complete frame written by gui_flush),
+     * never from canvas (the draw buffer which may be mid-clear). */
+    if (win->front_canvas && client_h > 0) {
+        gfx_blit(win->x, win->y + TITLE_BAR_H,
+                 win->w, client_h,
+                 win->front_canvas, win->w);
+    } else if (win->canvas && !win->front_canvas && client_h > 0) {
+        /* Fallback for windows without double-buffering (e.g. gui_term). */
         gfx_blit(win->x, win->y + TITLE_BAR_H,
                  win->w, client_h,
                  win->canvas, win->w);

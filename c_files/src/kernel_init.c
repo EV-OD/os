@@ -69,15 +69,26 @@ void kernel_init(unsigned int mb_magic, multiboot_info_t *mb)
      */
     if (mb_magic == MULTIBOOT_BOOTLOADER_MAGIC) {
         /*
-         * Reserve [phys_kernel_start, phys_kernel_end + KHEAP_INITIAL_SIZE)
-         * so the PFA never hands out physical frames that the kernel heap
-         * already uses.  kheap_init() maps its initial pool directly onto
-         * the PSE-backed virtual range starting at PHYS_TO_VIRT(kernel_end);
-         * without this reservation those frames would alias kheap memory.
+         * Reserve the ENTIRE kernel heap virtual address range from the PFA.
+         *
+         * The kheap spans virtual [kernel_virtual_end, KHEAP_VEND) which
+         * corresponds to physical [~0xaf6000, 0x3000000).  The PFA must not
+         * hand out any frame in that physical range to user processes.
+         *
+         * Reserving only (kernel_physical_end + KHEAP_INITIAL_SIZE) was not
+         * enough: kheap_expand() grows the heap beyond the initial 4 MB on
+         * demand (2 MB at a time).  If the PFA has already given a frame
+         * inside the expansion range to a user page directory, kheap_expand
+         * writes a block header on top of that page directory, corrupting it.
+         * When the scheduler reloads CR3 the CPU triple-faults and reboots.
+         *
+         * Reserving up to KHEAP_VEND (48 MB physical) is safe: the system
+         * has 64 MB of RAM, leaving 16 MB of physical frames (above 48 MB)
+         * available to user processes – more than sufficient for demos.
          */
         pfa_init(mb,
                  (unsigned int)&kernel_physical_start,
-                 (unsigned int)&kernel_physical_end + KHEAP_INITIAL_SIZE);
+                 KHEAP_VEND - 0xC0000000u);   /* 0x3000000 = 48 MB */
 
         /*
          * Extend kernel page-directory mapping so PHYS_TO_VIRT() works for

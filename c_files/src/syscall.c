@@ -386,9 +386,18 @@ static int sys_gui_flush(struct cpu_state *cpu, struct stack_state *stack)
     (void)stack; (void)cpu;
     wm_window_t *win = (wm_window_t *)cpu->ebx;
     if (win) {
-        win->dirty = 1;
-        wm_paint(win);  /* blit canvas + title bar for this window only */
-        fb_flush_rect(win->x, win->y, win->w, win->h);
+        /*
+         * Double-buffer present: copy draw canvas → front canvas.
+         * The compositor (desktop_run) always blits front_canvas, which
+         * only contains complete frames.  Without this the compositor
+         * catches the canvas mid-clear (all-black) causing flicker even
+         * when the window is standing still.
+         */
+        wm_present_canvas(win);
+        /* Update back-buffer for this window (front_canvas blit + title bar).
+         * Do NOT call fb_flush_rect – the compositor owns all fb_flush calls
+         * at FRAME_TICKS cadence (~50 fps). */
+        wm_paint(win);
     }
     return 0;
 }

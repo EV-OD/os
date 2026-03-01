@@ -43,16 +43,18 @@ struct wm_window {
     /* --- Identity ------------------------------------------------------- */
     char title[64];         /**< Title bar text (NUL-terminated).                 */
 
-    /* --- Canvas --------------------------------------------------------- */
+    /* --- Canvas (double-buffered) --------------------------------------- */
     /**
-     * Pixel buffer for the window's client area:
-     *   width  = w
-     *   height = h - TITLE_BAR_H
-     *   format = 32-bpp 0x00RRGGBB row-major
-     *   stride = w (tightly packed)
-     * Allocated by wm_create(); freed by wm_destroy().
+     * DRAW canvas – the user process renders here via syscalls.
+     * FRONT canvas – the compositor always blits from here.
+     *
+     * gui_flush (sys_gui_flush) atomically copies draw→front so the
+     * compositor never sees a partially-drawn frame.  Both buffers are
+     *   width  = w,  height = h - TITLE_BAR_H,  format = 32-bpp 0x00RRGGBB
      */
-    unsigned int *canvas;
+    unsigned int *canvas;         /**< Draw canvas (user writes here).           */
+    unsigned int *front_canvas;   /**< Front canvas (compositor blits from here).*/
+    unsigned int  canvas_size;    /**< Pixel count (w * (h-TITLE_BAR_H)).        */
 
     /* --- State ---------------------------------------------------------- */
     int visible;            /**< Non-zero if the window should be composited.     */
@@ -110,7 +112,14 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title);
  * The canvas is sized  win->w × (win->h - TITLE_BAR_H)  pixels (32-bpp).
  * Returns non-zero on success, 0 if kmalloc fails.
  */
-int wm_alloc_canvas(wm_window_t *win);
+int  wm_alloc_canvas(wm_window_t *win);
+
+/**
+ * Copy the draw canvas into the front canvas so the compositor sees a
+ * complete frame.  Called by sys_gui_flush after the user process finishes
+ * drawing a frame.  The compositor always blits front_canvas.
+ */
+void wm_present_canvas(wm_window_t *win);
 
 /**
  * Destroy a window: free its canvas, remove it from the stack.
