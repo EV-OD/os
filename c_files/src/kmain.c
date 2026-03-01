@@ -70,6 +70,10 @@ static void gui_shell_task(void)
     process_t *me = sched_current();
     if (me) me->bound_term = (void *)term_active();
     shell_run();
+    /* shell_run() returned (EOF from terminal close) – self-exit cleanly */
+    if (me) me->state = PROC_DEAD;
+    __asm__ volatile("sti");
+    for (;;) __asm__ volatile("hlt");
 }
 #endif
 

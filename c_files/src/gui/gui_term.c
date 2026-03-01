@@ -327,7 +327,12 @@ static int gt_get_char(void)
     if (!t) return -1;
     gui_term_state_t *gt = GT_FROM_TERM(t);
     while (gt->key_head == gt->key_tail) {
-        if (!gt->win) return 17;  /* window closed – return Ctrl+Q to exit shell */
+        if (!gt->win) {
+            /* Window was destroyed – yield one tick then return EOF so the
+             * caller (shell_run/gt_read_line) can exit its loop cleanly. */
+            __asm__ volatile("hlt");
+            return -1;
+        }
         /* yield – PIT-driven scheduler preempts to compositor */
     }
     char c = gt->key_buf[gt->key_head];
@@ -344,6 +349,7 @@ static int gt_read_line(char *buf, unsigned int max)
 
     while (pos < max - 1) {
         c = gt_get_char();
+        if (c < 0) return -1;  /* EOF / window destroyed – propagate up */
         if (c == '\n' || c == '\r') {
             gt_put_char('\n');
             break;

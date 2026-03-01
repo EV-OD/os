@@ -69,6 +69,10 @@ static void icon_rox_task(void)
     for (i = 0; i < 255; i++) lpath[i] = s_icon_launch_path[i];
     lpath[255] = '\0';
     rox_load_and_run(lpath, 0, (void *)0);
+    /* Mark dead then halt so the scheduler never reschedules this task. */
+    { process_t *me = sched_current(); if (me) me->state = PROC_DEAD; }
+    __asm__ volatile("sti");
+    for (;;) __asm__ volatile("hlt");
 }
 
 /* -------------------------------------------------------------------------
@@ -85,19 +89,24 @@ static void gui_shell_task(void)
     terminal_t *t = s_spawn_pending_term;
     s_spawn_pending_term = (void *)0;
     if (t) {
-        /* Bind this terminal to the running process so output is never
-         * mixed with other shell instances regardless of focus. */
         process_t *me = sched_current();
         if (me) me->bound_term = (void *)t;
-        /* Also set as the keyboard-focus active terminal. */
         term_set_active(t);
     }
     shell_run();
+    /* shell_run() returned (EOF from terminal close) – self-exit cleanly */
+    { process_t *me = sched_current(); if (me) me->state = PROC_DEAD; }
+    __asm__ volatile("sti");
+    for (;;) __asm__ volatile("hlt");
 }
 
 static void rxt_launch_task(void)
 {
     rox_load_and_run("/bin/rxt.rox", 0, (void *)0);
+    /* Mark dead then halt so the scheduler never reschedules this task. */
+    { process_t *me = sched_current(); if (me) me->state = PROC_DEAD; }
+    __asm__ volatile("sti");
+    for (;;) __asm__ volatile("hlt");
 }
 
 void desktop_spawn_terminal(void)

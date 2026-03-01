@@ -892,6 +892,7 @@ void shell_run(void)
         print_prompt();
 
         int len = readline(input, SHELL_MAX_INPUT);
+        if (len < 0) break;  /* EOF: terminal window was closed */
         if (len == 0) continue;  /* empty line */
 
         int argc = tokenise(input, argv, SHELL_MAX_ARGS);
