@@ -47,34 +47,11 @@ multiboot_info_t *g_multiboot_info = (multiboot_info_t *)0;
 
 #ifdef GUI_MODE
 #include "gui/desktop.h"
-#include "terminal.h"
-#include "gui/wm.h"
-#include "gui/gui_term.h"
-#include "terminal.h"
 #include "keyboard.h"   /* keyboard_flush() – clear PS/2 init residue */
 
-/*
- * Two kernel tasks for GUI mode:
- *   compositor  (nice=0)  – runs desktop_run() which handles mouse,
- *                            keyboard dispatch, and repaints every frame.
- *   shell       (nice=5)  – runs shell_run() which reads from the GUI
- *                            terminal's key buffer via term_active()->get_char().
- * The PIT at 10 ms preempts between them via the CFS scheduler.
- */
+/* Single compositor task – desktop_run() handles all input and rendering.
+ * Terminal windows are spawned on demand when the user clicks the icon. */
 static void gui_compositor_task(void) { desktop_run(); }
-static void gui_shell_task(void)
-{
-    /* Bind the currently active terminal to this process so that output
-     * from this shell always goes to terminal-1 even after new terminals
-     * are spawned and term_active() is redirected. */
-    process_t *me = sched_current();
-    if (me) me->bound_term = (void *)term_active();
-    shell_run();
-    /* shell_run() returned (EOF from terminal close) – self-exit cleanly */
-    if (me) me->state = PROC_DEAD;
-    __asm__ volatile("sti");
-    for (;;) __asm__ volatile("hlt");
-}
 #endif
 
 /* -------------------------------------------------------------------------
@@ -185,12 +162,9 @@ void kmain(unsigned int eax, unsigned int ebx)
              * sched_start() never returns; the PIT at 10 ms drives switching.
              */
             {
-                process_t *comp  = process_create("compositor",
-                                                  gui_compositor_task, 0);
-                // process_t *shell = process_create("shell",
-                //                                   gui_shell_task, 5);
-                if (comp)  sched_add(comp);
-                // if (shell) sched_add(shell);
+                process_t *comp = process_create("compositor",
+                                                 gui_compositor_task, 0);
+                if (comp) sched_add(comp);
             }
             log_info("[kmain] entering GUI mode (CFS scheduler)");
             /* Flush any PS/2 init residue from the keyboard ring buffer

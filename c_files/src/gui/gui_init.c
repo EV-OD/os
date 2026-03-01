@@ -11,9 +11,7 @@
 #include "gui/fb.h"
 #include "gui/mouse.h"
 #include "gui/wm.h"
-#include "gui/gui_term.h"
 #include "gui/desktop.h"
-#include "terminal.h"
 #include "multiboot.h"
 #include "log.h"
 
@@ -62,19 +60,6 @@ int gui_launch(multiboot_info_t *mb)
         return -1;
     }
 
-    int sw = (int)fb_width();
-    int sh = (int)fb_height();
-
-    /* Leave an 80-px left strip so desktop icons (x=16) are not hidden behind
-     * the initial terminal window. */
-    wm_window_t *win = wm_create(80, 4, sw - 88, sh - TASKBAR_H - 8, "Terminal");
-    if (win) {
-        terminal_t *t = gui_term_create(win);
-        if (t) {
-            term_set_active(t);
-        }
-    }
-
     desktop_init();
 
     /* Desktop icons – double-click to open */
@@ -85,6 +70,6 @@ int gui_launch(multiboot_info_t *mb)
      * RXT shortcut is added so the config file is the single source of truth. */
     desktop_load_config();
 
-    log_info("[gui] gui_launch complete – GUI terminal active");
+    log_info("[gui] gui_launch complete");
     return 0;
 }
