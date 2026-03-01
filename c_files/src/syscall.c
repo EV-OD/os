@@ -43,6 +43,7 @@ static int sys_gui_pen(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_fill_rect(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_fill_circle(struct cpu_state *cpu, struct stack_state *stack);
 static int sys_gui_fill_round(struct cpu_state *cpu, struct stack_state *stack);
+static int sys_gui_mouse(struct cpu_state *cpu, struct stack_state *stack);
 
 /* -------------------------------------------------------------------------
  * Syscall table
@@ -70,6 +71,7 @@ static syscall_fn_t syscall_table[] = {
     [SYS_GUI_FILL_RECT]   = sys_gui_fill_rect,
     [SYS_GUI_FILL_CIRCLE] = sys_gui_fill_circle,
     [SYS_GUI_FILL_ROUND]  = sys_gui_fill_round,
+    [SYS_GUI_MOUSE]       = sys_gui_mouse,
 };
 
 /* -------------------------------------------------------------------------
@@ -265,6 +267,7 @@ static int sys_yield(struct cpu_state *cpu, struct stack_state *stack)
 #include "gui/color.h"
 #include "gui/font.h"
 #include "gui/canvas.h"
+#include "gui/mouse.h"
 
 static int sys_gui_open(struct cpu_state *cpu, struct stack_state *stack)
 {
@@ -393,8 +396,10 @@ static int sys_gui_flush(struct cpu_state *cpu, struct stack_state *stack)
 static int sys_gui_poll(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
-    /* Return latest keyboard character maybe? */
-    /* Non-blocking read */
+    /* If the window was closed externally, return EV_CLOSE (-1) so
+     * poll-based event loops can exit gracefully. */
+    process_t *cur = sched_current();
+    if (cur && cur->killed) return -1;
     if (keyboard_available()) {
         return keyboard_read_char();
     }
@@ -472,6 +477,35 @@ static int sys_gui_fill_round(struct cpu_state *cpu, struct stack_state *stack)
     return 0;
 }
 
+/* -------------------------------------------------------------------------
+ * SYS_GUI_MOUSE (20) – packed mouse state relative to window client area.
+ * EBX = win
+ * Returns: (x & 0xFFF) | ((y & 0xFFF) << 12) | ((buttons & 0xFF) << 24)
+ * x,y are client-area coordinates (relative to canvas top-left).
+ * buttons: bit0 = left, bit1 = right.
+ * ------------------------------------------------------------------------- */
+static int sys_gui_mouse(struct cpu_state *cpu, struct stack_state *stack)
+{
+    (void)stack;
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
+    mouse_state_t ms = mouse_get();
+    int rx, ry;
+    if (win) {
+        rx = ms.x - win->x;
+        ry = ms.y - (win->y + TITLE_BAR_H);
+        /* clamp to client area */
+        if (rx < 0)   rx = 0;
+        if (ry < 0)   ry = 0;
+        if (rx >= win->w)                rx = win->w - 1;
+        if (ry >= win->h - TITLE_BAR_H) ry = win->h - TITLE_BAR_H - 1;
+    } else {
+        rx = ms.x;
+        ry = ms.y;
+    }
+    /* x in bits 0-11, y in bits 12-23, buttons in bits 24-25 */
+    return (rx & 0xFFF) | ((ry & 0xFFF) << 12) | (((int)ms.buttons & 0xFF) << 24);
+}
+
 static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
@@ -489,6 +523,13 @@ static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
     for (;;) {
         if (wcur) {
             if (wcur->killed) {
+                /* Window was closed (or Ctrl+C).  Returning -1 while
+                 * still runnable causes an infinite spin (the ROX program
+                 * re-enters gui_wait every instruction, sti never fires
+                 * long enough for the timer → system-wide freeze).
+                 * Terminate the process here instead; the shell's
+                 * process_wait() will see PROC_DEAD and unblock. */
+                wcur->wait_reason = WAIT_NONE;
                 wcur->exit_status = -1;
                 wcur->state       = PROC_DEAD;
                 for (;;) __asm__ volatile("hlt");

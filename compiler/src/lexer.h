@@ -120,6 +120,7 @@ typedef enum {
     TOK_GUI_FILL_RECT,  /* gui_fill_rect                                    */
     TOK_GUI_FILL_CIRCLE,/* gui_fill_circle                                  */
     TOK_GUI_FILL_ROUND, /* gui_fill_round                                   */
+    TOK_GUI_MOUSE,      /* gui_mouse  – packed mouse state for window       */
 
     /* Types */
     TOK_TYPE_I8,      /* i8                                               */

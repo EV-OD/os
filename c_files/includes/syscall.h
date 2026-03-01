@@ -43,9 +43,10 @@
 #define SYS_GUI_FILL_RECT   17  /* filled rectangle             */
 #define SYS_GUI_FILL_CIRCLE 18  /* filled circle                */
 #define SYS_GUI_FILL_ROUND  19  /* filled rounded rectangle     */
+#define SYS_GUI_MOUSE       20  /* packed mouse state (x|y<<12|btn<<24) for window */
 
 #undef SYSCALL_MAX
-#define SYSCALL_MAX  19
+#define SYSCALL_MAX  20
 
 
 /* -------------------------------------------------------------------------

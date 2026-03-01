@@ -284,6 +284,21 @@ void wm_invalidate_all(void)
 void wm_dispatch_key(char c)
 {
     wm_window_t *f = wm_focused();
+
+    /* Ctrl+C (0x03) – kill the focused window's owner process.
+     * This works for both kernel-backed mu_backend windows and plain
+     * ROX user-process windows (which have no on_key callback). */
+    if (c == 3) {
+        if (f && f->owner_pid > 0) {
+            process_t *p = process_find((unsigned int)f->owner_pid);
+            if (p && p->state != PROC_DEAD) {
+                p->killed = 1;
+                sched_wake_process(p); /* unblock if sleeping in gui_wait */
+            }
+        }
+        return; /* do not forward ^C as a text character */
+    }
+
     if (f && f->on_key)
         f->on_key(f, c);
 }
@@ -361,6 +376,7 @@ void wm_dispatch_mouse(int mx, int my, unsigned char btns)
                 /* Save owner pid before destroy invalidates the pointer. */
                 int owner = hit->owner_pid;
                 wm_destroy(hit);
+                wm_invalidate_all();  /* repaint immediately – removes residue */
                 /* Signal the owning process to terminate. */
                 if (owner > 0) {
                     process_t *p = process_find((unsigned int)owner);

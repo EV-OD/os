@@ -107,6 +107,7 @@ static const KwEntry KEYWORDS[] = {
     { "gui_fill_rect",   TOK_GUI_FILL_RECT  },
     { "gui_fill_circle", TOK_GUI_FILL_CIRCLE},
     { "gui_fill_round",  TOK_GUI_FILL_ROUND },
+    { "gui_mouse",        TOK_GUI_MOUSE      },
     /* primitive types */
     { "i8",         TOK_TYPE_I8   },
     { "i16",        TOK_TYPE_I16  },
@@ -409,6 +410,7 @@ const char *token_type_name(TokenType t)
         case TOK_GUI_FILL_RECT:    return "gui_fill_rect";
         case TOK_GUI_FILL_CIRCLE:  return "gui_fill_circle";
         case TOK_GUI_FILL_ROUND:   return "gui_fill_round";
+        case TOK_GUI_MOUSE:        return "gui_mouse";
         case TOK_TYPE_I8:     return "i8";
         case TOK_TYPE_I16:    return "i16";
         case TOK_TYPE_I32:    return "i32";

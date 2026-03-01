@@ -91,7 +91,8 @@ static int tok_is_gui(Parser *p)
             t == TOK_GUI_FLUSH        || t == TOK_GUI_CLOSE        ||
             t == TOK_GUI_WAIT         || t == TOK_GUI_POLL         ||
             t == TOK_GUI_PEN          || t == TOK_GUI_FILL_RECT    ||
-            t == TOK_GUI_FILL_CIRCLE  || t == TOK_GUI_FILL_ROUND);
+            t == TOK_GUI_FILL_CIRCLE  || t == TOK_GUI_FILL_ROUND ||
+            t == TOK_GUI_MOUSE);
 }
 
 /* Parse and return a type name string into buf (MAX_IDENT_LEN). */
@@ -215,6 +216,7 @@ static AstNode *parse_primary(Parser *p)
             case TOK_GUI_FILL_RECT:    n->gui_op = 17; break;
             case TOK_GUI_FILL_CIRCLE:  n->gui_op = 18; break;
             case TOK_GUI_FILL_ROUND:   n->gui_op = 19; break;
+            case TOK_GUI_MOUSE:         n->gui_op = 20; break;
             default:                   n->gui_op = 0;  break;
         }
 
