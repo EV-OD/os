@@ -94,6 +94,10 @@ wm_window_t *wm_create(int x, int y, int w, int h, const char *title)
     win->bg_color   = 0x001020;  /* default bg = dark navy  */
     win->owner_pid  = 0;
 
+    /* Per-window key queue – must be zero so head==tail (empty) on first use */
+    win->kq_head = 0;
+    win->kq_tail = 0;
+
     /* Push to front of Z-stack (shift others back by one) */
     for (i = wm_count; i > 0; i--)
         wm_stack[i] = wm_stack[i - 1];
@@ -317,26 +321,51 @@ void wm_invalidate_all(void)
  * wm_dispatch_key
  * ------------------------------------------------------------------------- */
 
+void wm_window_key_push(wm_window_t *win, unsigned char c)
+{
+    if (!win) return;
+    unsigned int next = (win->kq_head + 1) % WM_KEY_QUEUE_SIZE;
+    if (next == win->kq_tail) return; /* queue full, drop */
+    win->kq_buf[win->kq_head] = c;
+    win->kq_head = next;
+}
+
+int wm_window_key_pop(wm_window_t *win)
+{
+    if (!win || win->kq_head == win->kq_tail) return -1;
+    unsigned char c = win->kq_buf[win->kq_tail];
+    win->kq_tail = (win->kq_tail + 1) % WM_KEY_QUEUE_SIZE;
+    return (int)c;
+}
+
+int wm_window_key_available(wm_window_t *win)
+{
+    if (!win) return 0;
+    return win->kq_head != win->kq_tail;
+}
+
 void wm_dispatch_key(char c)
 {
     wm_window_t *f = wm_focused();
 
-    /* Ctrl+C (0x03) – kill the focused window's owner process.
-     * This works for both kernel-backed mu_backend windows and plain
-     * ROX user-process windows (which have no on_key callback). */
+    /* Ctrl+C (0x03) – kill the focused window's owner process. */
     if (c == 3) {
         if (f && f->owner_pid > 0) {
             process_t *p = process_find((unsigned int)f->owner_pid);
             if (p && p->state != PROC_DEAD) {
                 p->killed = 1;
-                sched_wake_process(p); /* unblock if sleeping in gui_wait */
+                sched_wake_process(p);
             }
         }
-        return; /* do not forward ^C as a text character */
+        return;
     }
 
     if (f && f->on_key)
         f->on_key(f, c);
+    else if (f)
+        /* User-process window (no on_key): deposit into per-window queue
+         * so sys_gui_wait / sys_gui_poll can drain it. */
+        wm_window_key_push(f, (unsigned char)c);
 }
 
 /* -------------------------------------------------------------------------

@@ -427,12 +427,13 @@ static int sys_gui_flush(struct cpu_state *cpu, struct stack_state *stack)
 static int sys_gui_poll(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
-    /* If the window was closed externally, return EV_CLOSE (-1) so
-     * poll-based event loops can exit gracefully. */
     process_t *cur = sched_current();
     if (cur && cur->killed) return -1;
-    if (keyboard_available()) {
-        return keyboard_read_char();
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
+    if (win && wm_window_key_available(win)) {
+        int pk = wm_window_key_pop(win);
+        log_info("[gui-poll] returning key=%d", pk);
+        return pk;
     }
     return 0;
 }
@@ -540,19 +541,20 @@ static int sys_gui_mouse(struct cpu_state *cpu, struct stack_state *stack)
 static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
 {
     (void)stack; (void)cpu;
-    /* Block until a key is pressed.
-     * sti lets keyboard/timer/mouse IRQs fire; hlt sleeps until one does.
-     * iret later restores EFLAGS from the saved user frame (IF=1). */
+    wm_window_t *win = (wm_window_t *)cpu->ebx;
     process_t *wcur = sched_current();
 
-    /* Fast path: key already waiting. */
-    int c = keyboard_read_char();
-    if (c != -1) return c;
+    /* Fast path: key already in window queue. */
+    if (win) {
+        int c = wm_window_key_pop(win);
+        if (c != -1) {
+            log_info("[gui-wait] fast-path key=%d", c);
+            return c;
+        }
+    }
 
-    /* Slow path: spin with hlt until a key arrives or the window closes.
-     * Stay RUNNABLE (do not set PROC_SLEEPING) so the keyboard IRQ's
-     * hlt wakeup is acted on immediately without waiting for the next
-     * 10 ms timer tick.  hlt still saves CPU between IRQs. */
+    log_info("[gui-wait] slow-path: entering hlt loop");
+    /* Slow path: spin with hlt until the compositor deposits a key. */
     __asm__ volatile("sti");
     for (;;) {
         if (wcur && wcur->killed) {
@@ -561,10 +563,14 @@ static int sys_gui_wait(struct cpu_state *cpu, struct stack_state *stack)
             for (;;) __asm__ volatile("hlt");
         }
         __asm__ volatile("hlt");
-        c = keyboard_read_char();
-        if (c != -1) break;
+        if (win) {
+            int c = wm_window_key_pop(win);
+            if (c != -1) {
+                log_info("[gui-wait] slow-path returning key=%d", c);
+                return c;
+            }
+        }
     }
-    return c;
 }
 
 /* =========================================================================

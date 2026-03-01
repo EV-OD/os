@@ -79,6 +79,14 @@ struct wm_window {
     /* --- Drawing state ------------------------------------------------- */
     unsigned int pen_color; /**< Current stroke colour (used by line/rect/circle). */
     unsigned int bg_color;  /**< Canvas background fill colour.                   */
+
+    /* --- Per-window key queue ------------------------------------------ */
+    /* User-process windows (no on_key callback) receive keys here.
+     * Filled by wm_dispatch_key; drained by sys_gui_wait / sys_gui_poll. */
+#define WM_KEY_QUEUE_SIZE 64
+    volatile unsigned char kq_buf[WM_KEY_QUEUE_SIZE];
+    volatile unsigned int  kq_head;   /**< Write index (ISR/compositor). */
+    volatile unsigned int  kq_tail;   /**< Read index  (app/syscall).    */
 };
 
 /* -------------------------------------------------------------------------
@@ -164,6 +172,15 @@ void wm_paint(wm_window_t *win);
  * @param c  The character (ASCII or special key code).
  */
 void wm_dispatch_key(char c);
+
+/** Push a key directly into a window's per-window queue (for user windows). */
+void wm_window_key_push(wm_window_t *win, unsigned char c);
+
+/** Pop a key from a window's per-window queue; returns -1 if empty. */
+int  wm_window_key_pop (wm_window_t *win);
+
+/** Non-zero if the window's key queue is non-empty. */
+int  wm_window_key_available(wm_window_t *win);
 
 /**
  * Deliver a mouse event to the appropriate window (hit-test, then dispatch).

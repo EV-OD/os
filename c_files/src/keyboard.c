@@ -113,6 +113,9 @@ static int buffer_pop(void)
     }
     int c = (int)char_buffer[tail];
     tail = (tail + 1) % sizeof(char_buffer);
+    log_info("[kbd-pop] char=%d ('%c')  head=%d new_tail=%d",
+             c, (c >= 32 && c < 127) ? (char)c : '?',
+             (int)head, (int)tail);
     return c;
 }
 
@@ -178,8 +181,13 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         return;
     }
 
+    /* Log every non-modifier scancode we see (press + release) */
+    log_info("[kbd-isr] sc=0x%02x  shift=%d ctrl=%d",
+             (int)scancode, (int)shift_held, (int)ctrl_held);
+
     /* Ignore other key releases (high bit set) */
     if (scancode & 0x80) {
+        log_info("[kbd-isr] sc=0x%02x → release, ignored", (int)scancode);
         return;
     }
 
@@ -222,7 +230,11 @@ static void keyboard_isr(struct cpu_state *cpu, struct stack_state *stack, unsig
         else if (ascii >= 'A' && ascii <= 'Z') ascii += 32;
     }
 
+    log_info("[kbd-isr] ascii=%d ('%c') pushed  head=%d tail=%d",
+             (int)(unsigned char)ascii, (ascii >= 32 && ascii < 127) ? ascii : '?',
+             (int)head, (int)tail);
     buffer_push(ascii);
+    log_info("[kbd-isr] after push  head=%d tail=%d", (int)head, (int)tail);
     /* Wake any process sleeping in sys_read / sys_gui_wait. */
     sched_wake_waiters(WAIT_KEY);
 }
