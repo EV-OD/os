@@ -289,9 +289,9 @@ c_files/
 
 | Phase | Milestone | Status | Key Deliverables |
 |---|---|---|---|
-| **Phase 1** | Minimal viable compiler | **Done** | Lexer, parser, codegen for integer arithmetic. `.rox` output. User-mode execution via `int 0x80`. Shell commands `rosc` and `sample`. |
-| **Phase 2** | Control flow & functions | Planned | `if`/`else`, `while`, `for`, user functions, call stack, `print()` built-in. |
-| **Phase 3** | Type system | Planned | Structs, arrays, pointers, type checking, `str` type. |
-| **Phase 4** | Hardware access | Planned | Inline asm, `port_in`/`port_out` syscalls, MMIO helpers. |
-| **Phase 5** | Optimiser | Planned | Constant folding (already done), dead-code elimination, register allocator. |
-| **Phase 6** | Standard library & tooling | Planned | `core.ros` stdlib, REPL/shell integration, debugger hooks. |
+| **Phase 1** | Minimal viable compiler | **Done** ✅ | Lexer, parser, codegen for integer arithmetic, `let`/`let mut`, bitwise/logical operators, constant folding. `.rox` format (32-byte header + flat x86-32). User-mode execution via `int 0x80`. Shell commands `rosc` and `sample`. |
+| **Phase 2** | Control flow & functions | **Done** ✅ | `if`/`else-if`/`else`, `while`, `for x in lo..hi`, `break`, `continue`, user `fn` with return values, recursion, forward-declaration pass, compound assignment (`+=` `-=` `*=` `/=` `%=`), `print`/`println` built-ins. |
+| **Phase 3** | Type system & stdlib | **Done** ✅ | `i32`, `u32`, `bool`, `str` (pointer to literal), `as` cast, `getarg` built-in, `import` system. Stdlib modules `math.ros` (8 fns), `io.ros` (11 fns), `gui.ros` (full widget toolkit + color constants + layout helpers). GUI syscalls `10+` for window management, drawing, events, mouse. |
+| **Phase 4** | Hardware access | **Partial** 🔄 | GUI syscalls expose framebuffer drawing and event I/O from user mode. VFS file I/O via `io.ros`. Full inline asm, `port_in`/`port_out` syscalls, and raw MMIO helpers remain planned. |
+| **Phase 5** | Optimiser | **Partial** 🔄 | Constant folding implemented. Dead-code elimination, common-sub-expression elimination, and a proper register allocator remain planned. |
+| **Phase 6** | Tooling & debugger | **Partial** 🔄 | `docs_gen.py` generates Markdown API docs from `///` doc-comments. `extract_stdlib.py` extracts embedded `.ros` sources from `shell.c`. REPL, step debugger, and disassembler remain planned. |
