@@ -256,4 +256,4 @@ A React + TypeScript + Vite application in `serial-monitor/` that streams COM1 o
 
 ## License
 
-This project is for educational and experimental purposes.
+This project is open-source and available under the [MIT License](LICENSE).
