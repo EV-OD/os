@@ -60,4 +60,24 @@ os_mode_t os_get_mode(void);
  */
 void os_set_mode(os_mode_t mode);
 
+/* -------------------------------------------------------------------------
+ * Built-in command type
+ * ------------------------------------------------------------------------- */
+typedef int (*builtin_fn_t)(int argc, char **argv);
+
+typedef struct builtin_cmd {
+    const char   *name;
+    const char   *description;
+    builtin_fn_t  handler;
+} builtin_cmd_t;
+
+extern const builtin_cmd_t builtins[];
+
 #endif /* SHELL_H */
+
+/* Modular shell headers */
+#include "shell/shell_core.h"
+#include "shell/shell_cmds.h"
+#include "shell/shell_stdlib.h"
+#include "shell/shell_apps.h"
+#include "shell/shell_sample.h"
