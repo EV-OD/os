@@ -1,6 +1,6 @@
 # RandomOS
 
-An experimental 32-bit operating system kernel written in C and x86 Assembly, booted via GRUB (Multiboot). The project features a higher-half kernel with paging, interrupt handling, device drivers, a freestanding C standard library subset, a structured logging system, a FAT32 virtual filesystem, a CFS multitasking scheduler, a VESA GUI subsystem, and a fully native compiler (`rosc`) for the RandomOS Language (`.ros`) that produces ring-3 user-mode executables at runtime inside the OS.
+An 32-bit operating system kernel written in C and x86 Assembly, booted via GRUB (Multiboot). The project features a higher-half kernel with paging, interrupt handling, device drivers, a freestanding C standard library subset, a structured logging system, a FAT32 virtual filesystem, a CFS multitasking scheduler, a VESA GUI subsystem, and a fully native compiler (`rosc`) for the RandomOS Language (`.ros`) that produces ring-3 user-mode executables at runtime inside the OS.
 
 See [os_features.md](os_features.md) for a full abstract overview of every major feature.
 
